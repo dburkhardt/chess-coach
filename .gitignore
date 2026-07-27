@@ -1,0 +1,11 @@
+.DS_Store
+.build/
+DerivedData/
+build/
+dist/
+*.xcuserstate
+xcuserdata/
+.swiftpm/
+ChessCoach/Resources/Engines/stockfish
+ChessCoach/Resources/Engines/stockfish.sha256
+Vendor/ChessKit/docs/

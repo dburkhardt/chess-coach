@@ -1,0 +1,22 @@
+diff --git a/Sources/ChessKit/FenSerialization.swift b/Sources/ChessKit/FenSerialization.swift
+--- a/Sources/ChessKit/FenSerialization.swift
++++ b/Sources/ChessKit/FenSerialization.swift
+@@ -10,4 +10,7 @@
+ /// FEN positions serialization and deserialization.
+ public class FenSerialization {
+ 
++    /// Public initializer for clients importing ChessKit as a package.
++    public init() {}
++
+     /**
+diff --git a/Sources/ChessKit/SanSerialization.swift b/Sources/ChessKit/SanSerialization.swift
+--- a/Sources/ChessKit/SanSerialization.swift
++++ b/Sources/ChessKit/SanSerialization.swift
+@@ -13,4 +13,7 @@ public class SanSerialization {
+     private let kCastlingKing = "O-O"
+     private let kCastlingQueen = "O-O-O"
+ 
++    /// Public initializer for clients importing ChessKit as a package.
++    public init() {}
++
+     // MARK: - Serialization

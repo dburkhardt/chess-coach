@@ -1,0 +1,104 @@
+name: ChessCoach
+options:
+  bundleIdPrefix: com.dburkhardt
+  deploymentTarget:
+    macOS: "26.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  xcodeVersion: "26.0"
+packages:
+  ChessKit:
+    path: Vendor/ChessKit
+settings:
+  base:
+    ARCHS: arm64
+    SWIFT_VERSION: "6.0"
+    MACOSX_DEPLOYMENT_TARGET: "26.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+targets:
+  ChessCoach:
+    type: application
+    platform: macOS
+    sources:
+      - path: ChessCoach
+        excludes:
+          - Resources
+      - path: ChessCoach/Resources/Engines
+        type: folder
+        buildPhase: resources
+      - path: ChessCoach/Resources/ThirdParty
+        type: folder
+        buildPhase: resources
+    dependencies:
+      - package: ChessKit
+    entitlements:
+      path: ChessCoach/ChessCoach.entitlements
+    info:
+      path: ChessCoach/Info.plist
+      properties:
+        CFBundleDisplayName: Chess Coach
+        CFBundleName: Chess Coach
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleIconName: AppIcon
+        LSApplicationCategoryType: public.app-category.education
+        LSMinimumSystemVersion: "26.0"
+        NSHighResolutionCapable: true
+        NSHumanReadableCopyright: "Copyright © 2026 Daniel Burkhardt"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dburkhardt.chesscoach
+        PRODUCT_NAME: ChessCoach
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "6"
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_STYLE: Automatic
+        ENABLE_HARDENED_RUNTIME: YES
+        COMBINE_HIDPI_IMAGES: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  ChessCoachTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - ChessCoachTests
+    dependencies:
+      - target: ChessCoach
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dburkhardt.chesscoach.tests
+        GENERATE_INFOPLIST_FILE: YES
+  ChessCoachUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - ChessCoachUITests
+    dependencies:
+      - target: ChessCoach
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dburkhardt.chesscoach.uitests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  ChessCoach:
+    build:
+      targets:
+        ChessCoach: all
+        ChessCoachTests: [test]
+    test:
+      gatherCoverageData: true
+      targets:
+        - name: ChessCoachTests
+    run:
+      config: Debug
+    archive:
+      config: Release
+  ChessCoach-UI:
+    build:
+      targets:
+        ChessCoach: all
+        ChessCoachUITests: [test]
+    test:
+      targets:
+        - name: ChessCoachUITests
+    run:
+      config: Debug

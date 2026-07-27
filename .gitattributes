@@ -1,0 +1,3 @@
+# Preserve the pinned upstream Chessnut artwork byte-for-byte. Several source
+# SVGs use CRLF line endings, so treat them as binary rather than normalizing.
+ChessCoach/Assets.xcassets/Chessnut*.imageset/*.svg binary

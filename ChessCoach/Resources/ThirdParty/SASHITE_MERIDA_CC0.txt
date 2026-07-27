@@ -1,0 +1,16 @@
+Sashite Merida Chess Assets
+
+Source: https://sashite.dev/assets/chess/
+Downloaded: 2026-07-26
+Basis: Chess Merida Unicode
+
+The source page states:
+
+  All assets on this page are released into the public domain under
+  CC0 1.0 Universal.
+
+CC0 1.0 Universal:
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The twelve SVG files bundled with Chess Coach are unmodified downloads from
+the source URLs linked on that page.
