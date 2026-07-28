@@ -203,7 +203,7 @@ clear_runtime_probe_process() {
 
 invoke_runtime_credential_probe() {
   local phase=$1
-  local status
+  local probe_exit_code
 
   RUNTIME_PROBE_LAST_OUTPUT=""
   RUNTIME_PROBE_LAST_ERROR=""
@@ -233,9 +233,9 @@ invoke_runtime_credential_probe() {
   RUNTIME_PROBE_WATCHDOG_PID=$!
 
   if wait "${RUNTIME_PROBE_CHILD_PID}"; then
-    status=0
+    probe_exit_code=0
   else
-    status=$?
+    probe_exit_code=$?
   fi
   RUNTIME_PROBE_CHILD_PID=""
   kill -TERM "${RUNTIME_PROBE_WATCHDOG_PID}" >/dev/null 2>&1 || true
@@ -254,7 +254,7 @@ invoke_runtime_credential_probe() {
   RUNTIME_PROBE_ERROR_FILE=""
   RUNTIME_PROBE_TIMEOUT_FILE=""
 
-  (( status == 0 && RUNTIME_PROBE_LAST_TIMED_OUT == 0 ))
+  (( probe_exit_code == 0 && RUNTIME_PROBE_LAST_TIMED_OUT == 0 ))
 }
 
 run_runtime_credential_probe() {
