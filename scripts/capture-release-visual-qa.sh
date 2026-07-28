@@ -131,10 +131,25 @@ run_scenario() {
     "--output-directory=${CAPTURE_DIR}" \
     "--scenario=${scenario}" &
   local process_id=$!
+  # LaunchServices occasionally creates the requested foreground process
+  # without actually making its window active when this script is run from an
+  # automation host. Re-opening this exact bundle (without `-n`) activates the
+  # already-running candidate; it cannot select an older installed copy
+  # because APP_PATH is absolute and that copy was closed above.
+  (
+    while kill -0 "${process_id}" >/dev/null 2>&1; do
+      sleep 2
+      kill -0 "${process_id}" >/dev/null 2>&1 || exit 0
+      open "${APP_PATH}" >/dev/null 2>&1 || true
+    done
+  ) &
+  local activation_id=$!
   local elapsed=0
 
   while kill -0 "${process_id}" >/dev/null 2>&1; do
     if (( elapsed >= CAPTURE_TIMEOUT_SECONDS )); then
+      kill "${activation_id}" >/dev/null 2>&1 || true
+      wait "${activation_id}" >/dev/null 2>&1 || true
       kill "${process_id}" >/dev/null 2>&1 || true
       wait "${process_id}" >/dev/null 2>&1 || true
       print -u2 "Capture output (${scenario}):"
@@ -146,6 +161,8 @@ run_scenario() {
     (( elapsed += 1 ))
   done
 
+  kill "${activation_id}" >/dev/null 2>&1 || true
+  wait "${activation_id}" >/dev/null 2>&1 || true
   if ! wait "${process_id}"; then
     print -u2 "Capture output (${scenario}):"
     tail -80 "${stdout_path}" >&2 || true

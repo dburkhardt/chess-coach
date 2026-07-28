@@ -130,9 +130,22 @@ open -n -W \
   "--output-directory=${CAPTURE_DIR}" \
   "--scenario=${SCENARIO}" &
 OPEN_PID=$!
+# Re-opening this exact installed bundle activates the already-running QA
+# process when an automation host prevented LaunchServices from making it
+# frontmost. Without `-n`, this does not create a second app instance.
+(
+  while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
+    sleep 2
+    kill -0 "${OPEN_PID}" >/dev/null 2>&1 || exit 0
+    open "${APP_PATH}" >/dev/null 2>&1 || true
+  done
+) &
+ACTIVATION_PID=$!
 ELAPSED=0
 while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
   if (( ELAPSED >= CAPTURE_TIMEOUT_SECONDS )); then
+    kill "${ACTIVATION_PID}" >/dev/null 2>&1 || true
+    wait "${ACTIVATION_PID}" >/dev/null 2>&1 || true
     kill "${OPEN_PID}" >/dev/null 2>&1 || true
     wait "${OPEN_PID}" >/dev/null 2>&1 || true
     tail -80 "${STDOUT_PATH}" >&2 || true
@@ -143,6 +156,8 @@ while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
   sleep 1
   (( ELAPSED += 1 ))
 done
+kill "${ACTIVATION_PID}" >/dev/null 2>&1 || true
+wait "${ACTIVATION_PID}" >/dev/null 2>&1 || true
 if ! wait "${OPEN_PID}"; then
   tail -80 "${STDOUT_PATH}" >&2 || true
   tail -80 "${STDERR_PATH}" >&2 || true
