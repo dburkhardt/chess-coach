@@ -104,6 +104,25 @@ case "${API_STATUS}" in
     print -u2 "Obsolete commit is still anonymously reachable through the public GitHub API."
     exit 1
     ;;
+  403)
+    WEB_URL="https://github.com/${REPOSITORY_SLUG}/commit/${OBSOLETE_COMMIT}"
+    WEB_STATUS=$(curl --silent --show-error --location \
+      --output /dev/null \
+      --write-out '%{http_code}' \
+      "${WEB_URL}")
+    case "${WEB_STATUS}" in
+      404) ;;
+      200)
+        print -u2 "Obsolete commit is still anonymously reachable through the public GitHub website."
+        exit 1
+        ;;
+      *)
+        print -u2 \
+          "GitHub reachability audit was inconclusive (API HTTP 403; web HTTP ${WEB_STATUS})."
+        exit 1
+        ;;
+    esac
+    ;;
   *)
     print -u2 "GitHub reachability audit was inconclusive (HTTP ${API_STATUS})."
     exit 1
