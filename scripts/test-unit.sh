@@ -10,6 +10,8 @@ if [[ ! -x "${REPO_DIR}/ChessCoach/Resources/Engines/stockfish" ]]; then
   exit 1
 fi
 
+"${SCRIPT_DIR}/test-graceful-app-quit.sh"
+
 xcodebuild \
   -project "${REPO_DIR}/ChessCoach.xcodeproj" \
   -scheme ChessCoach \

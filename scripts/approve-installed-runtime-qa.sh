@@ -130,10 +130,7 @@ APP_BUILD=$(plutil -extract CFBundleVersion raw -o - "${APP_INFO}")
   visual_qa_die "The running app no longer matches the installed visual-QA artifact."
 
 APP_PID_PATTERN='^/Applications/Chess Coach\.app/Contents/MacOS/ChessCoach($| )'
-
-running_app_pids() {
-  pgrep -f "${APP_PID_PATTERN}" || true
-}
+source "${SCRIPT_DIR}/graceful-app-quit-lib.sh"
 
 verify_running_pid() {
   local pid=$1
@@ -143,16 +140,6 @@ verify_running_pid() {
   command=$(ps -ww -p "${pid}" -o command=)
   [[ "${command}" == "/Applications/Chess Coach.app/Contents/MacOS/ChessCoach"* ]] ||
     visual_qa_die "Process ${pid} is not the exact installed Chess Coach executable."
-}
-
-wait_for_app_to_stop() {
-  local elapsed=0
-  while [[ -n "$(running_app_pids)" ]]; do
-    (( elapsed < 20 )) ||
-      visual_qa_die "Chess Coach did not quit within 20 seconds; runtime QA stopped without force-quitting it."
-    sleep 1
-    (( elapsed += 1 ))
-  done
 }
 
 wait_for_app_to_start() {
@@ -313,9 +300,9 @@ read "START_CONFIRMATION?Type '${EXPECTED_START}' when the app is usable: "
 [[ "${START_CONFIRMATION}" == "${EXPECTED_START}" ]] ||
   visual_qa_die "Prompt-free runtime verification was not started."
 
-osascript -e 'tell application id "com.dburkhardt.chesscoach" to quit' >/dev/null ||
-  visual_qa_die "Could not request a graceful quit before prompt-free relaunch."
-wait_for_app_to_stop
+quit_app_and_wait ||
+  visual_qa_die \
+    "Chess Coach did not quit within ${APP_QUIT_TIMEOUT_SECONDS} seconds; runtime QA stopped without force-quitting it."
 
 RUNTIME_PROBE_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
 [[ "${RUNTIME_PROBE_ID}" == ????????-????-????-????-???????????? ]] ||

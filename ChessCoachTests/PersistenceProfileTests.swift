@@ -319,6 +319,35 @@ struct PersistenceProfileTests {
         #expect(settings.contains("Validate Configuration"))
     }
 
+    @Test func installedRuntimeGateRetriesGracefulQuitWithoutForceKilling() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let runtimeGate = try String(
+            contentsOf: repository.appendingPathComponent(
+                "scripts/approve-installed-runtime-qa.sh"
+            ),
+            encoding: .utf8
+        )
+        let quitLibrary = try String(
+            contentsOf: repository.appendingPathComponent(
+                "scripts/graceful-app-quit-lib.sh"
+            ),
+            encoding: .utf8
+        )
+        let combinedSource = runtimeGate + quitLibrary
+
+        #expect(runtimeGate.contains("source \"${SCRIPT_DIR}/graceful-app-quit-lib.sh\""))
+        #expect(quitLibrary.contains("APP_QUIT_TIMEOUT_SECONDS:=30"))
+        #expect(quitLibrary.contains("APP_QUIT_RETRY_SECONDS=(5 15)"))
+        #expect(quitLibrary.contains("request_graceful_app_quit"))
+        #expect(quitLibrary.contains("describe_running_app_processes"))
+        #expect(!combinedSource.contains("kill -9"))
+        #expect(!combinedSource.contains("killall"))
+        #expect(!combinedSource.contains("pkill"))
+        #expect(!combinedSource.contains("forceTerminate"))
+    }
+
     private func makeGame(
         persistence: PersistenceController,
         assisted: Bool
