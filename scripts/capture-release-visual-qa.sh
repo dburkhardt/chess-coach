@@ -178,7 +178,10 @@ for scenario in "${SCENARIOS[@]}"; do
   sidecar="${CAPTURE_DIR}/${scenario}.json"
   [[ -f "${png}" ]] || visual_qa_die "Scenario ${scenario} did not create ${scenario}.png."
   [[ -f "${sidecar}" ]] || visual_qa_die "Scenario ${scenario} did not create ${scenario}.json."
-  plutil -lint "${sidecar}" >/dev/null ||
+  # `plutil -lint` rejects JSON input on current macOS even though its read
+  # and conversion paths accept the same valid document. Parse the document
+  # instead so malformed JSON still fails without a false negative.
+  plutil -p "${sidecar}" >/dev/null ||
     visual_qa_die "Scenario ${scenario} produced invalid JSON."
 
   width=$(visual_qa_image_dimension "${png}" pixelWidth)

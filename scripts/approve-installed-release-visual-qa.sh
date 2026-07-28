@@ -153,7 +153,9 @@ PNG="${CAPTURE_DIR}/${SCENARIO}.png"
 SIDECAR="${CAPTURE_DIR}/${SCENARIO}.json"
 [[ -f "${PNG}" && -f "${SIDECAR}" ]] ||
   visual_qa_die "The installed app did not produce its PNG and JSON sidecar."
-plutil -lint "${SIDECAR}" >/dev/null ||
+# `plutil -lint` rejects JSON input on current macOS. `-p` parses JSON and
+# exits nonzero for malformed input, which is the validation required here.
+plutil -p "${SIDECAR}" >/dev/null ||
   visual_qa_die "The installed app produced an invalid JSON sidecar."
 
 WIDTH=$(visual_qa_image_dimension "${PNG}" pixelWidth)
