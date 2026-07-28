@@ -6,6 +6,11 @@ import Foundation
 /// reconciled into the live game's move stream.
 enum ChessBoardPresentationContext: Equatable, Sendable {
     case live(gameID: UUID?, revision: Int)
+    case historyPreview(
+        previewID: UUID,
+        anchor: PositionAnchor,
+        selectedPly: Int
+    )
     case teachingAnchor(
         lessonID: UUID,
         anchor: PositionAnchor

@@ -1,4 +1,6 @@
 import Foundation
+import LocalAuthentication
+import Security
 import Synchronization
 import Testing
 @testable import ChessCoach
@@ -121,11 +123,17 @@ struct ModelInferenceClientTests {
         let openAI = InferenceConfiguration(
             provider: .openAI,
             baseURL: "https://api.openai.com",
-            modelID: "test-model",
+            modelID: "",
             apiMode: .automatic
         )
         #expect(throws: InferenceError.missingKey) {
             try client.validate(configuration: openAI, credential: "")
+        }
+        #expect(throws: InferenceError.missingModel) {
+            try client.validate(
+                configuration: openAI,
+                credential: "unit-test-token"
+            )
         }
 
         var custom = testConfiguration()
@@ -916,6 +924,223 @@ struct ModelInferenceClientTests {
         #expect(reloaded.existingKey(for: .openAI) == "stored-placeholder")
     }
 
+    @MainActor
+    @Test func credentialPrecedenceAndConfigurationIssuesAreTyped() throws {
+        let suiteName = "ChessCoachTests.Precedence.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let keychain = MemoryKeychain()
+        let settings = InferenceSettings(
+            defaults: defaults,
+            keychain: keychain
+        )
+
+        #expect(settings.credentialState == .missing)
+        #expect(settings.configurationIssue == .missingKey)
+
+        settings.useKeyForSession(" session-placeholder ")
+        #expect(settings.credentialState == .sessionOnly)
+        #expect(settings.existingKey() == "session-placeholder")
+        #expect(settings.configurationIssue == .missingModel)
+        #expect(
+            settings.keyForRequest(typedKey: " typed-placeholder ")
+                == "typed-placeholder"
+        )
+
+        settings.modelID = "test-model"
+        #expect(settings.configurationIssue == nil)
+        settings.clearSessionKey()
+        #expect(settings.credentialState == .missing)
+
+        try settings.savePersistentKey("stored-placeholder")
+        #expect(settings.credentialState == .stored)
+        #expect(settings.existingKey() == "stored-placeholder")
+
+        settings.useKeyForSession("new-session-placeholder")
+        #expect(settings.credentialState == .sessionOnly)
+        #expect(settings.existingKey() == "new-session-placeholder")
+        settings.clearSessionKey()
+        #expect(settings.existingKey() == "stored-placeholder")
+    }
+
+    @MainActor
+    @Test func persistentCredentialsAreReadOncePerProvider() throws {
+        let suiteName = "ChessCoachTests.ReadOnce.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("test-model", forKey: "ai.modelID")
+        let keychain = MemoryKeychain(
+            values: [
+                InferenceProviderKind.openAI.rawValue: "openai-placeholder",
+                InferenceProviderKind.customOpenAICompatible.rawValue:
+                    "custom-placeholder",
+            ]
+        )
+        let settings = InferenceSettings(
+            defaults: defaults,
+            keychain: keychain
+        )
+
+        #expect(
+            keychain.readCount(
+                account: InferenceProviderKind.openAI.rawValue
+            ) == 1
+        )
+        for _ in 0..<10 {
+            _ = settings.existingKey()
+            _ = settings.hasStoredKey
+            _ = settings.credentialState
+            _ = settings.isConfigured
+        }
+        #expect(
+            keychain.readCount(
+                account: InferenceProviderKind.openAI.rawValue
+            ) == 1
+        )
+
+        settings.provider = .customOpenAICompatible
+        settings.customEndpoint = "http://localhost:8080"
+        #expect(settings.existingKey() == "custom-placeholder")
+        #expect(
+            keychain.readCount(
+                account:
+                    InferenceProviderKind.customOpenAICompatible.rawValue
+            ) == 1
+        )
+        settings.provider = .openAI
+        settings.provider = .customOpenAICompatible
+        #expect(
+            keychain.readCount(
+                account:
+                    InferenceProviderKind.customOpenAICompatible.rawValue
+            ) == 1
+        )
+    }
+
+    @MainActor
+    @Test func sessionOnlyRuntimeNeverTouchesPersistentStore() throws {
+        let suiteName = "ChessCoachTests.SessionOnly.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("test-model", forKey: "ai.modelID")
+        let keychain = MemoryKeychain(
+            values: [
+                InferenceProviderKind.openAI.rawValue:
+                    "must-not-be-read",
+            ],
+            persistenceAvailability: .sessionOnly
+        )
+        let settings = InferenceSettings(
+            defaults: defaults,
+            keychain: keychain
+        )
+
+        #expect(settings.credentialState == .missing)
+        #expect(keychain.totalReadCount == 0)
+        try settings.saveKey("session-placeholder")
+        #expect(settings.credentialState == .sessionOnly)
+        #expect(settings.existingKey() == "session-placeholder")
+        #expect(keychain.totalReadCount == 0)
+        #expect(keychain.totalSaveCount == 0)
+
+        try settings.removeKey()
+        #expect(settings.credentialState == .missing)
+        #expect(keychain.totalDeleteCount == 0)
+    }
+
+    @MainActor
+    @Test func customProviderCanBeConfiguredWithoutInferenceKey() throws {
+        let suiteName = "ChessCoachTests.Keyless.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let settings = InferenceSettings(
+            defaults: defaults,
+            keychain: MemoryKeychain()
+        )
+
+        settings.provider = .customOpenAICompatible
+        #expect(settings.configurationIssue == .missingEndpoint)
+        settings.customEndpoint = "http://localhost:8080/v1"
+        #expect(settings.configurationIssue == .missingModel)
+        settings.modelID = "local-model"
+        #expect(settings.configurationIssue == nil)
+        #expect(settings.isConfigured)
+        #expect(settings.credentialState == .missing)
+    }
+
+    @Test func keychainQueriesAreProviderIsolatedAndNoninteractive() {
+        let store = KeychainStore()
+        let query = store.query(
+            account: InferenceProviderKind.openAI.rawValue
+        )
+
+        #expect(
+            query[kSecAttrService as String] as? String
+                == "com.dburkhardt.chesscoach.inference.v2"
+        )
+        #expect(
+            query[kSecAttrAccount as String] as? String
+                == InferenceProviderKind.openAI.rawValue
+        )
+        #expect(query[kSecAttrAccessGroup as String] == nil)
+        let context =
+            query[kSecUseAuthenticationContext as String] as? LAContext
+        #expect(context?.interactionNotAllowed == true)
+    }
+
+    @Test func installedIdentityGateDerivesRatherThanHardcodesTeam() throws {
+        for team in ["TEAMONE123", "TEAMTWO456"] {
+            let authorization = try InstalledAppIdentityGate.authorize(
+                InstalledAppRuntimeIdentity(
+                    bundlePath:
+                        InstalledAppIdentityGate.requiredBundlePath,
+                    bundleIdentifier:
+                        InstalledAppIdentityGate.requiredBundleIdentifier,
+                    signingIdentifier:
+                        InstalledAppIdentityGate.requiredBundleIdentifier,
+                    teamIdentifier: team,
+                    signatureIsValid: true
+                )
+            )
+            #expect(authorization.teamIdentifier == team)
+        }
+
+        let rejected = [
+            InstalledAppRuntimeIdentity(
+                bundlePath: "/tmp/Chess Coach.app",
+                bundleIdentifier:
+                    InstalledAppIdentityGate.requiredBundleIdentifier,
+                signingIdentifier:
+                    InstalledAppIdentityGate.requiredBundleIdentifier,
+                teamIdentifier: "TEAMONE123",
+                signatureIsValid: true
+            ),
+            InstalledAppRuntimeIdentity(
+                bundlePath: InstalledAppIdentityGate.requiredBundlePath,
+                bundleIdentifier:
+                    InstalledAppIdentityGate.requiredBundleIdentifier,
+                signingIdentifier:
+                    InstalledAppIdentityGate.requiredBundleIdentifier,
+                teamIdentifier: "",
+                signatureIsValid: true
+            ),
+            InstalledAppRuntimeIdentity(
+                bundlePath: InstalledAppIdentityGate.requiredBundlePath,
+                bundleIdentifier:
+                    InstalledAppIdentityGate.requiredBundleIdentifier,
+                signingIdentifier:
+                    InstalledAppIdentityGate.requiredBundleIdentifier,
+                teamIdentifier: "TEAMONE123",
+                signatureIsValid: false
+            ),
+        ]
+        for identity in rejected {
+            #expect(throws: KeychainError.self) {
+                try InstalledAppIdentityGate.authorize(identity)
+            }
+        }
+    }
+
     private func testConfiguration(
         mode: InferenceAPIMode = .responses
     ) -> InferenceConfiguration {
@@ -1096,21 +1321,54 @@ private final class ReplyURLProtocol: URLProtocol, @unchecked Sendable {
 
 private final class MemoryKeychain: KeychainStoring, @unchecked Sendable {
     private let lock = NSLock()
-    private var values: [String: String] = [:]
+    private var values: [String: String]
+    private var readCounts: [String: Int] = [:]
+    private var saveCount = 0
+    private var deleteCount = 0
+    let persistenceAvailability: CredentialPersistenceAvailability
+
+    init(
+        values: [String: String] = [:],
+        persistenceAvailability: CredentialPersistenceAvailability = .persistent
+    ) {
+        self.values = values
+        self.persistenceAvailability = persistenceAvailability
+    }
 
     func read(account: String) throws -> String? {
-        lock.withLock { values[account] }
+        lock.withLock {
+            readCounts[account, default: 0] += 1
+            return values[account]
+        }
     }
 
     func save(_ value: String, account: String) throws {
         lock.withLock {
+            saveCount += 1
             values[account] = value
         }
     }
 
     func delete(account: String) throws {
         lock.withLock {
+            deleteCount += 1
             values[account] = nil
         }
+    }
+
+    func readCount(account: String) -> Int {
+        lock.withLock { readCounts[account, default: 0] }
+    }
+
+    var totalReadCount: Int {
+        lock.withLock { readCounts.values.reduce(0, +) }
+    }
+
+    var totalSaveCount: Int {
+        lock.withLock { saveCount }
+    }
+
+    var totalDeleteCount: Int {
+        lock.withLock { deleteCount }
     }
 }

@@ -3,15 +3,44 @@ name: macOS
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   test:
     runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate release scripts
+        run: |
+          zsh -n scripts/*.sh
+          swiftc -typecheck scripts/make-visual-qa-contact-sheet.swift
+          swiftc -typecheck scripts/validate-release-visual-text.swift
+      - name: Verify sanitized public source
+        run: ./scripts/verify-public-source.sh
+      - name: Scan current ancestry for secrets
+        run: ./scripts/scan-public-secrets.sh
       - name: Fetch pinned Stockfish
         run: ./scripts/fetch-stockfish.sh
       - name: Generate Xcode project
         run: ./scripts/generate-project.sh
       - name: Unit tests (no signing or UI automation)
         run: ./scripts/test-unit.sh
+      - name: Fresh-clone unsigned Release build
+        run: ./scripts/verify-fresh-clone.sh
+
+  public-release:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v'))
+    needs: test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify sanitized public source
+        run: ./scripts/verify-public-source.sh
+      - name: Audit obsolete public references
+        run: ./scripts/audit-public-remote.sh

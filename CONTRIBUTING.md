@@ -23,7 +23,7 @@ fallback behavior, error handling, and credential redaction.
 ## Pull requests
 
 Keep changes focused, explain user-visible behavior, and include test evidence.
-Do not commit API keys, signing identities, private endpoints, confidential
+Do not commit inference keys, signing identities, private endpoints, confidential
 material, generated Stockfish binaries, build output, or notarized artifacts.
 
 By contributing, you agree that your contribution is licensed under the MIT

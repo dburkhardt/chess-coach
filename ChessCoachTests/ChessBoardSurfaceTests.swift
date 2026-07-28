@@ -520,6 +520,64 @@ struct MaterialBalanceTests {
     }
 }
 
+struct CapturedMaterialLedgerTests {
+    @Test func reconstructsOrdinaryCapturesFromTheMoveLine() {
+        let ledger = CapturedMaterialLedger(
+            initialFEN: ChessGameState.standardInitialFEN,
+            moves: ["e2e4", "d7d5", "e4d5", "d8d5"]
+        )
+
+        #expect(
+            ledger.pieces(capturedBy: .white).map(\.kind) == ["p"]
+        )
+        #expect(
+            ledger.pieces(capturedBy: .black).map(\.kind) == ["p"]
+        )
+        #expect(ledger.points(capturedBy: .white) == 1)
+        #expect(ledger.points(capturedBy: .black) == 1)
+    }
+
+    @Test func enPassantRecordsThePawnOnItsActualCaptureSquare() {
+        let ledger = CapturedMaterialLedger(
+            initialFEN: "8/8/8/3pP3/8/8/8/K6k w - d6 0 1",
+            moves: ["e5d6"]
+        )
+
+        let capture = ledger.pieces(capturedBy: .white)
+        #expect(capture.count == 1)
+        #expect(capture.first?.side == .black)
+        #expect(capture.first?.kind == "p")
+    }
+
+    @Test func promotionsAndPromotedPieceCapturesUseActualPieceKinds() {
+        let ledger = CapturedMaterialLedger(
+            initialFEN: "7k/P7/8/8/8/8/r7/7K w - - 0 1",
+            moves: ["a7a8q", "h8h7", "h1g1", "a2a8"]
+        )
+
+        let blackCaptures = ledger.pieces(capturedBy: .black)
+        #expect(blackCaptures.count == 1)
+        #expect(blackCaptures.first?.side == .white)
+        #expect(blackCaptures.first?.kind == "q")
+        #expect(ledger.points(capturedBy: .black) == 9)
+    }
+
+    @Test func truncatingTheLineRemovesAbandonedCaptures() {
+        let moves = ["e2e4", "d7d5", "e4d5", "d8d5"]
+        let beforeReply = CapturedMaterialLedger(
+            initialFEN: ChessGameState.standardInitialFEN,
+            moves: Array(moves.prefix(3))
+        )
+        let afterReply = CapturedMaterialLedger(
+            initialFEN: ChessGameState.standardInitialFEN,
+            moves: moves
+        )
+
+        #expect(beforeReply.pieces(capturedBy: .black).isEmpty)
+        #expect(afterReply.pieces(capturedBy: .black).count == 1)
+    }
+}
+
 struct ChessBoardPresentationTests {
     private let gameID = UUID()
 

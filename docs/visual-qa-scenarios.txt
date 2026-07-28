@@ -1,0 +1,7 @@
+fresh-default-dark
+fresh-compact-dark
+fresh-default-light
+lesson-default-dark
+completed-default-dark
+missing-inference-key-default-light
+inference-settings-default-light

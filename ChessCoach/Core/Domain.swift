@@ -223,6 +223,26 @@ struct PositionAnchor: Equatable, Sendable {
     let fen: String
 }
 
+/// A read-only projection of an earlier position in the active game.
+///
+/// The anchor binds the selection to the exact live continuation from which
+/// browsing began. Any real position revision invalidates the preview.
+struct HistoryPreviewState: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let anchor: PositionAnchor
+    var selectedPly: Int
+
+    init(
+        id: UUID = UUID(),
+        anchor: PositionAnchor,
+        selectedPly: Int
+    ) {
+        self.id = id
+        self.anchor = anchor
+        self.selectedPly = selectedPly
+    }
+}
+
 enum CoachEnhancementState: Equatable, Sendable {
     case notConfigured
     case preparing

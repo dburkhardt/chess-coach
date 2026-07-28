@@ -20,7 +20,11 @@ struct ChessBoardView: View {
             preferences: preferences,
             onMove: coordinator.handleBoardMove,
             onPromotion: coordinator.promote,
-            onEscape: coordinator.handleBoardEscape
+            onEscape: coordinator.handleBoardEscape,
+            onHistoryStep: { offset in
+                guard coordinator.historyPreview != nil else { return false }
+                return coordinator.stepHistoryPreview(by: offset)
+            }
         )
     }
 
@@ -40,6 +44,14 @@ struct ChessBoardView: View {
 @MainActor
 extension GameCoordinator {
     var chessBoardPresentationContext: ChessBoardPresentationContext {
+        if let preview = historyPreview {
+            return .historyPreview(
+                previewID: preview.id,
+                anchor: preview.anchor,
+                selectedPly: preview.selectedPly
+            )
+        }
+
         guard let moment = teachingMoment else {
             return .live(
                 gameID: activeGame?.id,
@@ -64,16 +76,20 @@ extension GameCoordinator {
     }
 
     var isTeachingPreviewActive: Bool {
-        if case .lessonPreview = chessBoardPresentationContext {
+        switch chessBoardPresentationContext {
+        case .historyPreview, .lessonPreview:
             return true
+        case .live, .teachingAnchor:
+            return false
         }
-        return false
     }
 
     var chessBoardSnapshot: ChessBoardSnapshot {
         switch chessBoardPresentationContext {
         case .live:
             return liveChessBoardSnapshot
+        case .historyPreview:
+            return historyPreviewSnapshot ?? liveChessBoardSnapshot
         case .teachingAnchor(let lessonID, let anchor):
             return teachingAnchorSnapshot(
                 lessonID: lessonID,
@@ -86,6 +102,82 @@ extension GameCoordinator {
 
     var displayedMaterialBalance: MaterialBalance {
         MaterialBalance(pieces: chessBoardSnapshot.pieces)
+    }
+
+    var displayedCapturedMaterial: CapturedMaterialLedger {
+        guard let game = activeGame else { return .empty }
+        var moves = game.sortedPlies.map(\.uci)
+
+        if let preview = historyPreview {
+            moves = Array(moves.prefix(preview.selectedPly))
+        } else if let moment = teachingMoment {
+            moves = Array(moves.prefix(moment.anchor.ply))
+            if case .previewing(_, let variationRank, let requestedStep) =
+                moment.phase,
+               case .ready(let prepared) = coachPreparationState,
+               prepared.anchor == moment.anchor,
+               let variation = prepared.context.variations.first(where: {
+                   $0.rank == variationRank
+               }) {
+                let line = variation.uciLine
+                    ?? (variation.move.isEmpty ? [] : [variation.move])
+                let step = min(max(0, requestedStep), line.count)
+                moves.append(contentsOf: line.prefix(step))
+            }
+        }
+
+        return CapturedMaterialLedger(
+            initialFEN: game.initialFEN,
+            moves: moves
+        )
+    }
+
+    private var historyPreviewSnapshot: ChessBoardSnapshot? {
+        guard let preview = historyPreview,
+              let game = activeGame,
+              game.id == preview.anchor.gameID,
+              preview.anchor.revision == boardPositionRevision,
+              preview.anchor.ply == game.sortedPlies.count,
+              (0..<preview.anchor.ply).contains(preview.selectedPly)
+        else {
+            return nil
+        }
+
+        let prefix = Array(game.sortedPlies.prefix(preview.selectedPly))
+        let previewState = ChessGameState(
+            initialFEN: game.initialFEN,
+            moves: prefix.map(\.uci)
+        )
+        let latestMove = prefix.last.flatMap { ply -> ChessBoardMoveIntent? in
+            guard ply.uci.count >= 4 else { return nil }
+            return ChessBoardMoveIntent(
+                source: String(ply.uci.prefix(2)),
+                destination: String(ply.uci.dropFirst(2).prefix(2)),
+                promotion: ply.uci.count > 4
+                    ? String(ply.uci.suffix(1))
+                    : nil
+            )
+        }
+        let checkSquare = previewState.isCheck
+            ? previewState.pieces.first(where: {
+                $0.side == previewState.sideToMove && $0.kind == "k"
+            })?.square
+            : nil
+
+        return ChessBoardSnapshot(
+            gameID: preview.id,
+            revision: preview.selectedPly,
+            plyCount: preview.selectedPly,
+            pieces: previewState.pieces,
+            perspective: playerSide,
+            turn: previewState.sideToMove,
+            legalDestinations: [:],
+            lastMove: latestMove,
+            checkSquare: checkSquare,
+            arrows: [],
+            promotionState: nil,
+            inputAvailable: false
+        )
     }
 
     private var liveChessBoardSnapshot: ChessBoardSnapshot {
@@ -266,6 +358,11 @@ extension GameCoordinator {
     }
 
     func handleBoardEscape() -> Bool {
+        if historyPreview != nil {
+            returnToLivePosition()
+            return true
+        }
+
         guard let moment = teachingMoment,
               case .previewing = moment.phase
         else {

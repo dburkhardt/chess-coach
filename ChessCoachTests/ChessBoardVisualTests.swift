@@ -202,33 +202,25 @@ struct ChessBoardVisualTests {
         )
     }
 
-    @Test func fixedCoachReadinessLabelsRender() throws {
+    @Test func missingInferenceConfigurationNoticeRenders() throws {
         #expect(
-            CoachReadinessStatus.allCases.map(\.label) == [
-                "Analyzing position",
-                "Hint ready · Coach polishing",
-                "Coach hint ready",
-                "Stockfish hint ready",
-            ]
+            InferenceConfigurationIssue.missingKey.message
+                == "No inference key configured."
         )
 
-        let content = VStack(alignment: .leading, spacing: 9) {
-            ForEach(
-                Array(CoachReadinessStatus.allCases.enumerated()),
-                id: \.offset
-            ) { _, status in
-                CoachReadinessLabel(status: status)
-            }
-        }
+        let content = InferenceConfigurationNotice(
+            issue: .missingKey,
+            onConfigure: {}
+        )
         .padding(16)
-        .frame(width: 260, height: 118, alignment: .leading)
+        .frame(width: 320, height: 70, alignment: .leading)
         .background(Color(nsColor: .windowBackgroundColor))
         .environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
         let image = try #require(renderer.nsImage)
-        #expect(image.size == CGSize(width: 260, height: 118))
-        try write(image, named: "coach-readiness-labels")
+        #expect(image.size == CGSize(width: 320, height: 70))
+        try write(image, named: "missing-inference-key")
     }
 
     private func renderAcceptance(

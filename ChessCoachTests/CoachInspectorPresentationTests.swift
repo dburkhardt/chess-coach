@@ -31,11 +31,16 @@ struct CoachInspectorPresentationTests {
         )
         #expect(lesson.scene == .lesson)
 
+        let reviewing = resolver.resolve(
+            snapshot(isHistoryPreviewActive: true)
+        )
+        #expect(reviewing.scene == .reviewing)
+
         let live = resolver.resolve(snapshot())
         #expect(live.scene == .live)
 
         for presentation in [
-            neutral, empty, completed, warning, lesson, live,
+            neutral, empty, completed, warning, lesson, reviewing, live,
         ] {
             #expect(
                 presentation.commands.filter { $0.style == .primary }.count <= 1
@@ -43,13 +48,51 @@ struct CoachInspectorPresentationTests {
         }
     }
 
-    @Test func liveReadinessMapsToOneStatusAndOneAction() throws {
+    @Test func historyReviewSuppressesActionsAndComposer() {
+        let reviewing = resolver.resolve(
+            snapshot(
+                isHistoryPreviewActive: true,
+                preparationState: .ready(
+                    prepared(
+                        anchor: anchor(),
+                        enhancement: .ready
+                    )
+                ),
+                canTakeBack: true
+            )
+        )
+
+        #expect(reviewing.scene == .reviewing)
+        #expect(reviewing.header.status == "Reviewing earlier position")
+        #expect(!reviewing.header.showsTakeBack)
+        #expect(reviewing.commands.isEmpty)
+        #expect(!reviewing.showsComposer)
+    }
+
+    @Test func completedGameKeepsTranscriptBehindHistory() {
+        let completed = resolver.resolve(
+            snapshot(
+                gameResult: .draw,
+                earlierItemCount: 8
+            )
+        )
+
+        #expect(completed.scene == .completed)
+        #expect(completed.header.status == "Game complete")
+        #expect(completed.header.showsHistory)
+        #expect(completed.earlierItemCount == 8)
+        #expect(completed.commands.isEmpty)
+        #expect(!completed.showsComposer)
+    }
+
+    @Test func liveReadinessUsesOneQuietHintAction() throws {
         let anchor = anchor()
         let analyzing = resolver.resolve(
             snapshot(preparationState: .analyzing(anchor))
         )
-        #expect(analyzing.header.status == "Analyzing position")
-        #expect(analyzing.commands.isEmpty)
+        #expect(analyzing.header.status == nil)
+        #expect(analyzing.commands.map(\.label) == ["Hint"])
+        #expect(analyzing.primaryCommand?.isEnabled == false)
 
         let polishing = resolver.resolve(
             snapshot(
@@ -58,8 +101,10 @@ struct CoachInspectorPresentationTests {
                 )
             )
         )
-        #expect(polishing.header.status == "Hint ready · Coach polishing")
+        #expect(polishing.header.status == nil)
         #expect(polishing.primaryCommand?.action == .openHint)
+        #expect(polishing.primaryCommand?.label == "Hint")
+        #expect(polishing.commands.count == 1)
 
         let coachReady = resolver.resolve(
             snapshot(
@@ -68,7 +113,7 @@ struct CoachInspectorPresentationTests {
                 )
             )
         )
-        #expect(coachReady.header.status == "Coach hint ready")
+        #expect(coachReady.header.status == nil)
 
         let stockfishReady = resolver.resolve(
             snapshot(
@@ -77,24 +122,23 @@ struct CoachInspectorPresentationTests {
                 )
             )
         )
-        #expect(stockfishReady.header.status == "Stockfish hint ready")
+        #expect(stockfishReady.header.status == nil)
 
         let failed = resolver.resolve(
             snapshot(
                 preparationState: .failed(anchor, message: "engine exited")
             )
         )
-        #expect(failed.header.status == "Coaching unavailable")
+        #expect(failed.header.status == nil)
         #expect(failed.primaryCommand?.action == .retryAnalysis)
+        #expect(failed.primaryCommand?.label == "Hint")
 
         let unavailable = resolver.resolve(
             snapshot(
-                chatState: .unavailable(
-                    message: "Configure an AI provider in Settings."
-                )
+                chatState: .unavailable(issue: .missingKey)
             )
         )
-        #expect(unavailable.header.status == "Coaching unavailable")
+        #expect(unavailable.header.status == nil)
     }
 
     @Test func teachingCommandsStayFocusedByPhase() {
@@ -369,11 +413,13 @@ struct CoachInspectorPresentationTests {
         gameResult: GameResult = .inProgress,
         isEngineThinking: Bool = false,
         hasBlunderWarning: Bool = false,
+        isHistoryPreviewActive: Bool = false,
         preparationState: CoachPreparationState = .idle,
         teachingMoment: TeachingMomentState? = nil,
         canTakeBack: Bool = false,
         chatState: CoachChatState = .ready,
-        hasPrincipalVariation: Bool = false
+        hasPrincipalVariation: Bool = false,
+        earlierItemCount: Int = 0
     ) -> CoachInspectorSnapshot {
         CoachInspectorSnapshot(
             isCurrentGameVisible: isCurrentGameVisible,
@@ -381,10 +427,12 @@ struct CoachInspectorPresentationTests {
             gameResult: gameResult,
             isEngineThinking: isEngineThinking,
             hasBlunderWarning: hasBlunderWarning,
+            isHistoryPreviewActive: isHistoryPreviewActive,
             preparationState: preparationState,
             teachingMoment: teachingMoment,
             canTakeBack: canTakeBack,
             chatState: chatState,
+            earlierItemCount: earlierItemCount,
             hasPrincipalVariation: hasPrincipalVariation
         )
     }

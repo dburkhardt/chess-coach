@@ -47,7 +47,7 @@ final class GameCoordinator {
     private(set) var activeGame: SavedGame?
     private(set) var coachMessages: [CoachMessage] = []
     private(set) var coachChatState: CoachChatState = .unavailable(
-        message: "Configure an AI provider in Settings."
+        issue: .missingModel
     )
     private(set) var currentHint: CoachHint?
     private(set) var hintRevealed = false
@@ -55,6 +55,7 @@ final class GameCoordinator {
     private(set) var blunderWarning: BlunderWarning?
     private(set) var coachPreparationState: CoachPreparationState = .idle
     private(set) var teachingMoment: TeachingMomentState?
+    private(set) var historyPreview: HistoryPreviewState?
 
     var selectedSquare: String?
     var promotionRequest: PromotionRequest?
@@ -109,7 +110,8 @@ final class GameCoordinator {
         blunderWarning == nil &&
         !isEngineThinking &&
         !isCoachWorking &&
-        teachingMoment == nil
+        teachingMoment == nil &&
+        historyPreview == nil
     }
 
     var canMoveFromTeachingMoment: Bool {
@@ -157,6 +159,7 @@ final class GameCoordinator {
             gameResult: status.result,
             isEngineThinking: isEngineThinking,
             hasBlunderWarning: blunderWarning != nil,
+            isHistoryPreviewActive: historyPreview != nil,
             preparationState: coachPreparationState,
             teachingMoment: teachingMoment,
             canTakeBack: canTakeBack,
@@ -175,6 +178,7 @@ final class GameCoordinator {
               blunderWarning == nil,
               !isEngineThinking,
               teachingMoment == nil,
+              historyPreview == nil,
               let anchor = currentPositionAnchor(),
               case .ready(let prepared) = coachPreparationState
         else {
@@ -184,7 +188,10 @@ final class GameCoordinator {
     }
 
     var canTakeBack: Bool {
-        guard status.result == .inProgress, let game = activeGame else {
+        guard status.result == .inProgress,
+              historyPreview == nil,
+              let game = activeGame
+        else {
             return false
         }
         return game.plies.contains(where: { $0.side == playerSide })
@@ -215,9 +222,195 @@ final class GameCoordinator {
         return rows
     }
 
+    /// Selects an earlier position for read-only inspection.
+    ///
+    /// This intentionally does not tick or pause clocks, cancel work, mutate
+    /// the legal game, or persist assistance. Reaching the current ply exits
+    /// history browsing and returns to the live board.
+    @discardableResult
+    func selectHistoryPreview(ply: Int) -> Bool {
+        guard let game = activeGame,
+              teachingMoment == nil,
+              blunderWarning == nil,
+              promotionRequest == nil,
+              let anchor = currentPositionAnchor(),
+              game.id == anchor.gameID,
+              game.sortedPlies.count == anchor.ply,
+              (0...anchor.ply).contains(ply)
+        else {
+            return false
+        }
+
+        if ply == anchor.ply {
+            historyPreview = nil
+            return true
+        }
+
+        if var preview = historyPreview,
+           preview.anchor == anchor {
+            preview.selectedPly = ply
+            historyPreview = preview
+        } else {
+            historyPreview = HistoryPreviewState(
+                anchor: anchor,
+                selectedPly: ply
+            )
+        }
+        return true
+    }
+
+    /// Steps the current read-only preview without changing the live game.
+    @discardableResult
+    func stepHistoryPreview(by offset: Int) -> Bool {
+        guard offset != 0,
+              var preview = historyPreview,
+              matchesCurrentPosition(preview.anchor)
+        else {
+            return false
+        }
+        let destination = min(
+            preview.anchor.ply,
+            max(0, preview.selectedPly + offset)
+        )
+        guard destination != preview.selectedPly else { return false }
+        if destination == preview.anchor.ply {
+            historyPreview = nil
+        } else {
+            preview.selectedPly = destination
+            historyPreview = preview
+        }
+        return true
+    }
+
+    func returnToLivePosition() {
+        historyPreview = nil
+    }
+
+    /// The clocks belonging to the completed-game position being presented.
+    ///
+    /// During a live game the authoritative clock intentionally keeps running
+    /// while the player reviews history, so the strip must keep showing that
+    /// live countdown. Once a game is complete, review instead projects the
+    /// historical snapshot that a confirmed rewind would restore.
+    var displayedClocks: ClockSnapshot {
+        guard status.isFinished,
+              let preview = historyPreview,
+              let game = activeGame,
+              preview.anchor.gameID == game.id,
+              preview.anchor.ply == game.sortedPlies.count,
+              (0..<preview.anchor.ply).contains(preview.selectedPly)
+        else {
+            return clocks
+        }
+
+        let sorted = game.sortedPlies
+        if preview.selectedPly == 0 {
+            return sorted.first?.clockBefore
+                ?? .initial(for: game.timeControl)
+        }
+        return sorted[preview.selectedPly - 1].clockAfter
+    }
+
+    /// Destructively replaces the live continuation with the selected history
+    /// position. Browsing alone never calls this path; callers must explicitly
+    /// confirm the rewind and then invoke it.
+    @discardableResult
+    func rewindToHistoryPreview() -> Bool {
+        guard let preview = historyPreview,
+              let game = activeGame,
+              teachingMoment == nil,
+              blunderWarning == nil,
+              matchesCurrentPosition(preview.anchor),
+              game.id == preview.anchor.gameID
+        else {
+            return false
+        }
+
+        let sorted = game.sortedPlies
+        let keep = preview.selectedPly
+        guard sorted.count == preview.anchor.ply,
+              keep >= 0,
+              keep < sorted.count
+        else {
+            return false
+        }
+
+        let restoredClocks: ClockSnapshot
+        if keep == 0 {
+            restoredClocks = sorted.first?.clockBefore
+                ?? .initial(for: game.timeControl)
+        } else {
+            restoredClocks = sorted[keep - 1].clockAfter
+        }
+        let keptMoves = sorted.prefix(keep).map(\.uci)
+
+        advancePositionRevision()
+        cancelWork()
+        state = ChessGameState(
+            initialFEN: game.initialFEN,
+            moves: Array(keptMoves)
+        )
+        clocks = restoredClocks
+        status = ChessGameStatus()
+        blunderWarning = nil
+        currentHint = nil
+        hintRevealed = false
+        hintArrow = nil
+        coachPreparationState = .idle
+        lastAnalysis = nil
+        baselineAnalysis = nil
+        errorMessage = ""
+
+        game.result = .inProgress
+        game.endReason = .none
+        game.endedAt = nil
+        let rebuildsProfile = game.profileIncorporated
+        game.reviewCompleted = false
+        game.profileIncorporated = false
+        game.reviewAttemptedAt = nil
+        game.reviewLastError = ""
+        game.reviewSummary = ""
+        game.averageExpectedScoreLoss = 0
+        game.blunderCount = 0
+        game.mistakeCount = 0
+        for ply in sorted.prefix(keep) {
+            ply.expectedScoreBefore = nil
+            ply.expectedScoreAfter = nil
+            ply.classification = nil
+            ply.expectedScoreLoss = nil
+            ply.bestMoveUCI = ""
+            ply.bestMoveSAN = ""
+            ply.principalVariationSAN = ""
+        }
+
+        persistence.truncate(game: game, toPlyCount: keep)
+        persistence.recordAssistance(
+            .takeBack,
+            atPly: keep,
+            detail: "Rewound to the selected move-history position.",
+            in: game
+        )
+        if rebuildsProfile {
+            persistence.rebuildProfileFromIncorporatedGames()
+        }
+        coachMessages.removeAll { $0.ply > keep }
+        activeClockSide = state.sideToMove
+        lastClockTick = clock.now()
+        updateSavedGame()
+        persistence.refreshGames()
+        startClock()
+
+        if state.sideToMove == playerSide {
+            cacheBaselineAnalysis()
+        } else {
+            requestOpponentMove()
+        }
+        return true
+    }
+
     func newGame(_ configuration: NewGameConfiguration) {
         abandonActiveGameIfNeeded()
-        positionRevision += 1
+        advancePositionRevision()
         cancelWork()
         self.configuration = configuration
         playerSide = configuration.colorChoice.resolved()
@@ -254,7 +447,7 @@ final class GameCoordinator {
         if activeGame?.id != game.id {
             abandonActiveGameIfNeeded()
         }
-        positionRevision += 1
+        advancePositionRevision()
         cancelWork()
         let moves = game.plies.sorted(by: { $0.index < $1.index }).map(\.uci)
         state = ChessGameState(initialFEN: game.initialFEN, moves: moves)
@@ -395,7 +588,10 @@ final class GameCoordinator {
     }
 
     func takeBack() {
-        guard status.result == .inProgress, let game = activeGame else {
+        guard status.result == .inProgress,
+              historyPreview == nil,
+              let game = activeGame
+        else {
             return
         }
         let sorted = game.plies.sorted(by: { $0.index < $1.index })
@@ -404,7 +600,7 @@ final class GameCoordinator {
         }
         let playerDecision = sorted[playerDecisionIndex]
         let keep = playerDecisionIndex
-        positionRevision += 1
+        advancePositionRevision()
         cancelWork()
         state = state.rebuilt(keeping: keep)
         clocks = playerDecision.clockBefore
@@ -593,7 +789,8 @@ final class GameCoordinator {
         guard !trimmed.isEmpty,
               !isCoachWorking,
               activeGame != nil,
-              status.result == .inProgress
+              status.result == .inProgress,
+              historyPreview == nil
         else { return }
         freezeTeachingUpgrade()
         coachTask?.cancel()
@@ -648,7 +845,7 @@ final class GameCoordinator {
         var operationToken: PositionRevisionToken?
         do {
             let made = try state.make(uci: uci)
-            positionRevision += 1
+            advancePositionRevision()
             teachingMoment = nil
             coachPreparationState = .idle
             currentHint = nil
@@ -797,7 +994,7 @@ final class GameCoordinator {
         let clockBefore = clocks
         do {
             let made = try state.make(uci: uci)
-            positionRevision += 1
+            advancePositionRevision()
             teachingMoment = nil
             coachPreparationState = .idle
             currentHint = nil
@@ -1282,7 +1479,7 @@ final class GameCoordinator {
 
     private func finish(result: GameResult, reason: GameEndReason, message: String) {
         guard status.result == .inProgress else { return }
-        positionRevision += 1
+        advancePositionRevision()
         status = ChessGameStatus(result: result, reason: reason, message: message)
         activeClockSide = nil
         isEngineThinking = false
@@ -1311,7 +1508,9 @@ final class GameCoordinator {
         reviewTask?.cancel()
         reviewTask = Task { [weak self] in
             guard let self, !Task.isCancelled else { return }
-            await reviewAnalyzer.review(game: game, persistence: persistence)
+            await reviewAnalyzer.reviewPendingGames(
+                persistence: persistence
+            )
         }
     }
 
@@ -1337,7 +1536,7 @@ final class GameCoordinator {
             coachChatState = .ready
         } else {
             coachChatState = .unavailable(
-                message: "Configure an AI provider in Settings."
+                issue: inferenceSettings.configurationIssue ?? .missingModel
             )
         }
     }
@@ -1350,6 +1549,20 @@ final class GameCoordinator {
             ply: state.plyCount,
             fen: state.fen
         )
+    }
+
+    /// Advances the authoritative live position and invalidates every
+    /// read-only history selection made against the previous continuation.
+    private func advancePositionRevision() {
+        positionRevision += 1
+        historyPreview = nil
+    }
+
+    private func matchesCurrentPosition(_ anchor: PositionAnchor) -> Bool {
+        anchor.gameID == activeGame?.id &&
+            anchor.ply == state.plyCount &&
+            anchor.fen == state.fen &&
+            anchor.revision == positionRevision
     }
 
     private func teachingHint(
@@ -1462,10 +1675,7 @@ final class GameCoordinator {
     }
 
     private func isCurrent(_ anchor: PositionAnchor) -> Bool {
-        anchor.gameID == activeGame?.id &&
-            anchor.ply == state.plyCount &&
-            anchor.fen == state.fen &&
-            anchor.revision == positionRevision &&
+        matchesCurrentPosition(anchor) &&
             status.result == .inProgress
     }
 

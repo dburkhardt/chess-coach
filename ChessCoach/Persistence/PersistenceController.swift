@@ -243,4 +243,46 @@ final class PersistenceController {
         profile = replacement
         save()
     }
+
+    /// Rebuilds derived coaching metrics from the games that still own a
+    /// completed profile contribution.
+    ///
+    /// This is intentionally used when a completed game is reopened from an
+    /// earlier move. Rolling aggregates are not safely reversible one field at
+    /// a time, so replaying the remaining reviewed games is the deterministic
+    /// way to remove the abandoned result without losing onboarding or the
+    /// learner's own notes.
+    func rebuildProfileFromIncorporatedGames() {
+        let onboardingComplete = profile.onboardingComplete
+        let experience = profile.experience
+        let userNotes = profile.userNotes
+
+        var descriptor = FetchDescriptor<SavedGame>(
+            sortBy: [SortDescriptor(\.startedAt, order: .forward)]
+        )
+        descriptor.fetchLimit = nil
+        let incorporatedGames = (
+            (try? container.mainContext.fetch(descriptor)) ?? []
+        ).filter {
+            $0.reviewCompleted &&
+                $0.profileIncorporated &&
+                $0.result != .inProgress &&
+                $0.result != .abandoned
+        }
+
+        container.mainContext.delete(profile)
+        let replacement = LearnerProfile(
+            onboardingComplete: onboardingComplete,
+            experience: experience
+        )
+        replacement.userNotes = userNotes
+        container.mainContext.insert(replacement)
+        profile = replacement
+
+        let service = LearnerProfileService()
+        for game in incorporatedGames {
+            service.incorporate(game: game, into: replacement)
+        }
+        save()
+    }
 }

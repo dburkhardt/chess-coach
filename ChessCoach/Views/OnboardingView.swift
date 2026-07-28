@@ -6,7 +6,7 @@ struct OnboardingView: View {
     var complete: () -> Void
 
     @State private var step = 1
-    @State private var apiKey = ""
+    @State private var inferenceKey = ""
     @State private var discoveredModels: [String] = []
     @State private var status: InferenceTestStatus = .idle
     @State private var isWorking = false
@@ -99,11 +99,11 @@ struct OnboardingView: View {
         @Bindable var settings = settings
         return VStack(alignment: .leading, spacing: 18) {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Optional natural-language coaching")
+                Text("Optional inference-powered coaching")
                     .font(.largeTitle.bold())
                 Text(
                     "Stockfish play, analysis, arrows, and deterministic hints work "
-                        + "without an AI provider. When configured, your selected provider "
+                        + "without an inference provider. When configured, your selected provider "
                         + "receives the current coaching context for background hint "
                         + "preparation and explicit chat requests."
                 )
@@ -115,6 +115,11 @@ struct OnboardingView: View {
                     Text(provider.title).tag(provider)
                 }
             }
+            .onChange(of: settings.provider) {
+                inferenceKey = ""
+                discoveredModels = []
+                status = .idle
+            }
 
             if settings.provider == .customOpenAICompatible {
                 TextField("Endpoint URL", text: $settings.customEndpoint)
@@ -124,13 +129,25 @@ struct OnboardingView: View {
 
             SecureField(
                 settings.hasStoredKey
-                    ? "New API key (a key is already stored)"
+                    ? "New inference key (a key is already stored)"
                     : (settings.provider.requiresCredential
-                        ? "API key"
-                        : "API key (optional)"),
-                text: $apiKey
+                        ? "Inference key"
+                        : "Inference key (optional)"),
+                text: $inferenceKey
             )
             .textContentType(.password)
+            .accessibilityIdentifier("onboarding-inference-key-field")
+
+            credentialStatus(settings: settings)
+
+            if settings.credentialPersistenceAvailability == .sessionOnly {
+                Text(
+                    "This development or relocated build keeps inference keys "
+                        + "in memory for this session only."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
 
             TextField("Model ID", text: $settings.modelID)
 
@@ -157,7 +174,9 @@ struct OnboardingView: View {
                     run(success: "Configuration is valid.") {
                         try inference.validate(
                             configuration: settings.configuration,
-                            credential: settings.keyForRequest(typedKey: apiKey)
+                            credential: settings.keyForRequest(
+                                typedKey: inferenceKey
+                            )
                         )
                     }
                 }
@@ -165,7 +184,9 @@ struct OnboardingView: View {
                     run(success: "Model discovery finished.") {
                         discoveredModels = try await inference.listModels(
                             configuration: settings.configuration,
-                            credential: settings.keyForRequest(typedKey: apiKey)
+                            credential: settings.keyForRequest(
+                                typedKey: inferenceKey
+                            )
                         )
                     }
                 }
@@ -173,7 +194,9 @@ struct OnboardingView: View {
                     run(success: "\(settings.modelID) is accessible.") {
                         try await inference.testModel(
                             configuration: settings.configuration,
-                            credential: settings.keyForRequest(typedKey: apiKey)
+                            credential: settings.keyForRequest(
+                                typedKey: inferenceKey
+                            )
                         )
                     }
                 }
@@ -183,7 +206,7 @@ struct OnboardingView: View {
             statusView
 
             Text(
-                "Tests use the typed key without saving it. Model discovery is optional, "
+                "Tests use the typed inference key without saving it. Model discovery is optional, "
                     + "so a manually entered model ID remains usable."
             )
             .font(.caption)
@@ -200,23 +223,60 @@ struct OnboardingView: View {
 
                 Spacer()
 
-                if !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Button("Start Without Saving Key") {
-                        complete()
+                if !inferenceKey
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .isEmpty {
+                    if settings.credentialPersistenceAvailability == .persistent {
+                        Button("Use for This Session & Start") {
+                            useForSessionAndComplete()
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Save Inference Key & Start") {
+                            saveAndComplete()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Use for This Session & Start") {
+                            useForSessionAndComplete()
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
-                    Button("Save Key & Start") {
-                        saveAndComplete()
-                    }
-                    .buttonStyle(.borderedProminent)
                 } else if settings.isConfigured {
                     Button("Start Learning", action: complete)
                         .buttonStyle(.borderedProminent)
                 } else {
-                    Button("Start Without AI", action: complete)
+                    Button("Start Without Inference", action: complete)
                         .buttonStyle(.borderedProminent)
                 }
             }
             .controlSize(.large)
+        }
+    }
+
+    @ViewBuilder
+    private func credentialStatus(
+        settings: InferenceSettings
+    ) -> some View {
+        switch settings.credentialState {
+        case .missing:
+            Label(
+                "No inference key configured",
+                systemImage: "exclamationmark.circle"
+            )
+            .foregroundStyle(.secondary)
+        case .sessionOnly:
+            Label(
+                "Using an inference key for this session",
+                systemImage: "clock.badge.checkmark"
+            )
+            .foregroundStyle(.secondary)
+        case .stored:
+            Label(
+                "Inference key stored securely",
+                systemImage: "key.fill"
+            )
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -256,12 +316,18 @@ struct OnboardingView: View {
 
     private func saveAndComplete() {
         do {
-            try settings.saveKey(apiKey)
-            apiKey = ""
+            try settings.savePersistentKey(inferenceKey)
+            inferenceKey = ""
             complete()
         } catch {
             status = .failure(error.localizedDescription)
         }
+    }
+
+    private func useForSessionAndComplete() {
+        settings.useKeyForSession(inferenceKey)
+        inferenceKey = ""
+        complete()
     }
 
     private func run(
@@ -269,7 +335,7 @@ struct OnboardingView: View {
         _ work: @escaping @MainActor () async throws -> Void
     ) {
         isWorking = true
-        status = .working("Contacting model provider…")
+        status = .working("Contacting inference provider…")
         Task { @MainActor in
             defer { isWorking = false }
             do {

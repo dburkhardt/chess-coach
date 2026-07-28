@@ -21,8 +21,10 @@ struct CoachInspectorHeader: View {
 
                 Text(presentation.title)
                     .font(.headline)
+                    .lineLimit(1)
+                    .layoutPriority(1)
 
-                Spacer(minLength: 8)
+                Spacer(minLength: 0)
 
                 if presentation.showsHistory {
                     Button(action: onHistory) {
@@ -33,6 +35,7 @@ struct CoachInspectorHeader: View {
                     .accessibilityLabel(
                         "Earlier coaching, \(historyCount) items"
                     )
+                    .fixedSize()
                 }
 
                 if presentation.showsTakeBack {
@@ -42,6 +45,7 @@ struct CoachInspectorHeader: View {
                     .buttonStyle(.plain)
                     .help("Take Back")
                     .accessibilityLabel("Take Back")
+                    .fixedSize()
                 }
 
                 if presentation.showsSettings {
@@ -51,6 +55,8 @@ struct CoachInspectorHeader: View {
                     .buttonStyle(.plain)
                     .help("Coach and board settings")
                     .accessibilityLabel("Coach and board settings")
+                    .accessibilityIdentifier("coach-settings")
+                    .fixedSize()
                 }
             }
 
@@ -65,7 +71,7 @@ struct CoachInspectorHeader: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 11)
-        .frame(minHeight: 62)
+        .frame(minHeight: 50)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Coach header")
     }
@@ -168,10 +174,10 @@ struct CoachCommandShelf: View {
         switch command.action {
         case .takeBack, .playOn, .askCoach:
             .orange
-        case .revealMove, .exploreEngineLine,
+        case .openHint, .revealMove, .exploreEngineLine,
              .previewPrevious, .previewNext, .returnToPosition:
             .blue
-        case .continuePlaying, .openHint:
+        case .continuePlaying:
             .coachGreen
         case .retryAnalysis:
             .accentColor
@@ -195,38 +201,13 @@ struct CoachEmptyWorkspace: View {
 }
 
 struct LiveCoachWorkspace: View {
-    let preparationState: CoachPreparationState
-    let isEngineThinking: Bool
     let chatState: CoachChatState
     let currentConversationCount: Int
-    let historyCount: Int
     let onConversation: () -> Void
-    let onHistory: () -> Void
-    let onSettings: () -> Void
+    let onConfigureInference: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            VStack(alignment: .leading, spacing: 7) {
-                Label("Need a nudge?", systemImage: "lightbulb")
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(Color.coachGreen)
-                    .textCase(.uppercase)
-
-                Text(title)
-                    .font(.title3.weight(.semibold))
-
-                Text(detail)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                Color.coachGreen.opacity(0.075),
-                in: RoundedRectangle(cornerRadius: 13)
-            )
-
+        VStack(alignment: .leading, spacing: 14) {
             if currentConversationCount > 0 {
                 CoachNavigationRow(
                     title: "Conversation",
@@ -236,41 +217,70 @@ struct LiveCoachWorkspace: View {
                 )
             }
 
-            if historyCount > 0 {
-                CoachNavigationRow(
-                    title: "Earlier in this game",
-                    count: historyCount,
-                    systemImage: "clock.arrow.circlepath",
-                    action: onHistory
+            if case .unavailable(let issue) = chatState {
+                InferenceConfigurationNotice(
+                    issue: issue,
+                    onConfigure: onConfigureInference
                 )
             }
-
-            if case .unavailable(let message) = chatState {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(message)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Button("Configure AI Provider in Settings", action: onSettings)
-                        .buttonStyle(.link)
-                        .font(.caption)
-                }
-            }
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Live coaching")
     }
+}
 
-    private var title: String {
-        "Build the habit, not just the move."
+struct InferenceConfigurationNotice: View {
+    let issue: InferenceConfigurationIssue
+    let onConfigure: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 7) {
+            Image(systemName: "exclamationmark.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(message)
+                .foregroundStyle(.secondary)
+            Button("Configure here", action: onConfigure)
+                .buttonStyle(.link)
+                .accessibilityIdentifier("configure-inference")
+        }
+        .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(message) Configure here")
     }
 
-    private var detail: String {
-        switch preparationState {
-        case .failed:
-            return "Retry when you want Coach to study this exact position."
-        case .idle, .analyzing, .ready:
-            return "Open Hint for one concept. The game pauses while you explore it."
+    private var message: String {
+        switch issue {
+        case .missingKey:
+            "No inference key configured."
+        case .missingEndpoint:
+            "No inference endpoint configured."
+        case .missingModel:
+            "No inference model configured."
         }
+    }
+}
+
+struct HistoryReviewWorkspace: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(
+                "Read-only board review",
+                systemImage: "clock.arrow.circlepath"
+            )
+            .font(.subheadline.weight(.semibold))
+
+            Text(
+                "Return to the live position before opening a hint or asking Coach."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -595,37 +605,53 @@ struct BlunderGuardWorkspace: View {
 }
 
 struct CoachCompletedWorkspace: View {
-    let items: [CoachThreadItem]
-    let playerSide: ChessSide
+    let itemCount: Int
+    let onHistory: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 15) {
-            Text("Game transcript")
-                .font(.title3.weight(.semibold))
+        VStack(alignment: .leading, spacing: 14) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(Color.coachGreen)
+                .accessibilityHidden(true)
 
-            Text("This completed game is read-only.")
+            Text("Game complete")
+                .font(.title3.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+
+            if itemCount == 0 {
+                Text("No coaching was used in this game.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(
+                    "\(itemCount) coaching \(itemCount == 1 ? "item is" : "items are") saved with this game."
+                )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
-            if items.isEmpty {
-                ContentUnavailableView(
-                    "No coaching in this game",
-                    systemImage: "bubble.left",
-                    description: Text(
-                        "Hints and conversations will appear here."
-                    )
-                )
-                .frame(minHeight: 220)
-            } else {
-                ForEach(items) { item in
-                    CoachThreadItemView(
-                        item: item,
-                        playerSide: playerSide,
-                        collapsesLessons: true
+                Button(action: onHistory) {
+                    Label(
+                        "View Coaching History",
+                        systemImage: "clock.arrow.circlepath"
                     )
                 }
+                .buttonStyle(.bordered)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(
+            Color.secondary.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 13)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            itemCount == 0
+                ? "Game complete. No coaching was used."
+                : "Game complete. \(itemCount) coaching items saved."
+        )
     }
 }
 
@@ -675,6 +701,7 @@ struct CoachConversationView: View {
                     .padding(12)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
         }
         .defaultScrollAnchor(.bottom)
@@ -711,6 +738,7 @@ struct CoachHistoryView: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(16)
         }
         .navigationTitle("Coach History")
@@ -718,11 +746,19 @@ struct CoachHistoryView: View {
 }
 
 struct CoachComposer: View {
+    enum Presentation: Equatable {
+        case footer
+        case inline
+    }
+
+    @Environment(\.controlActiveState) private var controlActiveState
+
     @Binding var question: String
     let title: String
     let placeholder: String
     let isWorking: Bool
     let onSend: () -> Void
+    var presentation: Presentation = .footer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -730,37 +766,76 @@ struct CoachComposer: View {
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(.secondary)
                 .textCase(.uppercase)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
 
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField(
-                    placeholder,
-                    text: $question,
-                    axis: .vertical
-                )
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...4)
-                .onSubmit(onSend)
-                .disabled(isWorking)
-
-                Button(action: onSend) {
-                    Image(systemName: "arrow.up")
-                        .font(.headline)
-                        .frame(width: 20, height: 20)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .bottom, spacing: 8) {
+                    questionField
+                    sendButton
                 }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    question.trimmingCharacters(
-                        in: .whitespacesAndNewlines
-                    ).isEmpty || isWorking
-                )
-                .accessibilityLabel("Send question")
+
+                VStack(alignment: .trailing, spacing: 8) {
+                    questionField
+                    sendButton
+                }
             }
+            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 11)
-        .background(.bar)
+        .padding(12)
+        .background(
+            Color(nsColor: .controlBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 11)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 11)
+                .stroke(
+                    Color.secondary.opacity(
+                        controlActiveState == .inactive ? 0.42 : 0.24
+                    ),
+                    lineWidth: 1
+                )
+        }
+        .padding(.horizontal, presentation == .footer ? 12 : 0)
+        .padding(.vertical, presentation == .footer ? 10 : 0)
+        .background(
+            presentation == .footer
+                ? Color(nsColor: .windowBackgroundColor)
+                : Color.clear
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
+        .accessibilityIdentifier("coach-composer")
+    }
+
+    private var questionField: some View {
+        TextField(
+            placeholder,
+            text: $question,
+            axis: .vertical
+        )
+        .textFieldStyle(.roundedBorder)
+        .lineLimit(1...4)
+        .frame(minWidth: 0, maxWidth: .infinity)
+        .onSubmit(onSend)
+        .disabled(isWorking)
+    }
+
+    private var sendButton: some View {
+        Button(action: onSend) {
+            Image(systemName: "arrow.up")
+                .font(.headline)
+                .frame(width: 20, height: 20)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(
+            question.trimmingCharacters(
+                in: .whitespacesAndNewlines
+            ).isEmpty || isWorking
+        )
+        .accessibilityLabel("Send question")
+        .accessibilityIdentifier("coach-send-question")
+        .fixedSize()
     }
 }
 
@@ -869,71 +944,76 @@ private struct CoachThreadItemView: View {
     let collapsesLessons: Bool
 
     var body: some View {
-        switch item {
-        case .lesson(let message):
-            if collapsesLessons {
-                DisclosureGroup {
+        Group {
+            switch item {
+            case .lesson(let message):
+                if collapsesLessons {
+                    DisclosureGroup {
+                        CoachMessageContent(
+                            message: message,
+                            playerSide: playerSide
+                        )
+                        .padding(.top, 8)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Teaching moment")
+                                .font(.subheadline.weight(.semibold))
+                            Text(
+                                message.structuredReply?.summary ?? message.text
+                            )
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        }
+                    }
+                    .padding(12)
+                    .background(
+                        .secondary.opacity(0.055),
+                        in: RoundedRectangle(cornerRadius: 11)
+                    )
+                } else {
                     CoachMessageContent(
                         message: message,
                         playerSide: playerSide
                     )
-                    .padding(.top, 8)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Teaching moment")
-                            .font(.subheadline.weight(.semibold))
-                        Text(message.structuredReply?.summary ?? message.text)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                }
+            case .turn(let turn):
+                VStack(spacing: 9) {
+                    CoachMessageBubble(
+                        message: turn.question,
+                        playerSide: playerSide
+                    )
+                    if let answer = turn.answer {
+                        CoachMessageBubble(
+                            message: answer,
+                            playerSide: playerSide
+                        )
                     }
                 }
-                .padding(12)
-                .background(
-                    .secondary.opacity(0.055),
-                    in: RoundedRectangle(cornerRadius: 11)
-                )
-            } else {
-                CoachMessageContent(
+            case .pending(let turn):
+                VStack(spacing: 9) {
+                    CoachMessageBubble(
+                        message: turn.question,
+                        playerSide: playerSide
+                    )
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.mini)
+                        Text("Preparing a grounded answer…")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(11)
+                }
+            case .warning(let message), .legacy(let message):
+                CoachMessageBubble(
                     message: message,
                     playerSide: playerSide
                 )
             }
-        case .turn(let turn):
-            VStack(spacing: 9) {
-                CoachMessageBubble(
-                    message: turn.question,
-                    playerSide: playerSide
-                )
-                if let answer = turn.answer {
-                    CoachMessageBubble(
-                        message: answer,
-                        playerSide: playerSide
-                    )
-                }
-            }
-        case .pending(let turn):
-            VStack(spacing: 9) {
-                CoachMessageBubble(
-                    message: turn.question,
-                    playerSide: playerSide
-                )
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("Preparing a grounded answer…")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(11)
-            }
-        case .warning(let message), .legacy(let message):
-            CoachMessageBubble(
-                message: message,
-                playerSide: playerSide
-            )
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -953,7 +1033,6 @@ private struct CoachMessageBubble: View {
                 playerSide: playerSide
             )
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(11)
         .background(
             message.role == .user
@@ -963,6 +1042,7 @@ private struct CoachMessageBubble: View {
         )
         .padding(.leading, message.role == .user ? 28 : 0)
         .padding(.trailing, message.role == .user ? 0 : 14)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var roleLabel: String {
@@ -992,10 +1072,14 @@ private struct CoachMessageContent: View {
             Text(attributed)
                 .font(.subheadline)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         } else {
             Text(message.text.isEmpty ? "…" : message.text)
                 .font(.subheadline)
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

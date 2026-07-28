@@ -7,6 +7,7 @@ struct ChessBoardSurface: View {
     let onMove: (ChessBoardMoveIntent) -> Void
     let onPromotion: (String) -> Void
     let onEscape: () -> Bool
+    let onHistoryStep: (Int) -> Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.displayScale) private var displayScale
@@ -27,13 +28,15 @@ struct ChessBoardSurface: View {
         preferences: ChessBoardPreferences,
         onMove: @escaping (ChessBoardMoveIntent) -> Void,
         onPromotion: @escaping (String) -> Void,
-        onEscape: @escaping () -> Bool = { false }
+        onEscape: @escaping () -> Bool = { false },
+        onHistoryStep: @escaping (Int) -> Bool = { _ in false }
     ) {
         self.snapshot = snapshot
         self.preferences = preferences
         self.onMove = onMove
         self.onPromotion = onPromotion
         self.onEscape = onEscape
+        self.onHistoryStep = onHistoryStep
         _presentationFrame = State(
             initialValue: ChessBoardPresentationFrame(snapshot: snapshot)
         )
@@ -77,10 +80,24 @@ struct ChessBoardSurface: View {
                 }
             }
             .onKeyPress(.leftArrow) {
-                moveKeyboardFocus(column: -1, row: 0, geometry: geometry)
+                if onHistoryStep(-1) {
+                    return .handled
+                }
+                return moveKeyboardFocus(
+                    column: -1,
+                    row: 0,
+                    geometry: geometry
+                )
             }
             .onKeyPress(.rightArrow) {
-                moveKeyboardFocus(column: 1, row: 0, geometry: geometry)
+                if onHistoryStep(1) {
+                    return .handled
+                }
+                return moveKeyboardFocus(
+                    column: 1,
+                    row: 0,
+                    geometry: geometry
+                )
             }
             .onKeyPress(.upArrow) {
                 moveKeyboardFocus(column: 0, row: -1, geometry: geometry)
@@ -691,7 +708,7 @@ struct ChessHintArrowPolygon {
     }
 }
 
-private struct ChessPieceArtwork: View {
+struct ChessPieceArtwork: View {
     let piece: BoardPiece
     let style: ChessBoardPreferences.PieceStyle
 

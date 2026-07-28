@@ -4,6 +4,7 @@ enum CoachInspectorScene: String, Equatable, Sendable {
     case neutral
     case empty
     case live
+    case reviewing
     case warning
     case lesson
     case completed
@@ -22,7 +23,7 @@ enum CoachInspectorRoute: Hashable, Sendable {
 }
 
 enum CoachChatState: Equatable, Sendable {
-    case unavailable(message: String)
+    case unavailable(issue: InferenceConfigurationIssue)
     case ready
     case working
     case failed(message: String)
@@ -88,6 +89,7 @@ struct CoachInspectorSnapshot: Equatable, Sendable {
     var gameResult: GameResult
     var isEngineThinking: Bool
     var hasBlunderWarning: Bool
+    var isHistoryPreviewActive: Bool
     var preparationState: CoachPreparationState
     var teachingMoment: TeachingMomentState?
     var canTakeBack: Bool
@@ -103,6 +105,7 @@ struct CoachInspectorSnapshot: Equatable, Sendable {
         gameResult: GameResult = .inProgress,
         isEngineThinking: Bool = false,
         hasBlunderWarning: Bool = false,
+        isHistoryPreviewActive: Bool = false,
         preparationState: CoachPreparationState = .idle,
         teachingMoment: TeachingMomentState? = nil,
         canTakeBack: Bool = false,
@@ -117,6 +120,7 @@ struct CoachInspectorSnapshot: Equatable, Sendable {
         self.gameResult = gameResult
         self.isEngineThinking = isEngineThinking
         self.hasBlunderWarning = hasBlunderWarning
+        self.isHistoryPreviewActive = isHistoryPreviewActive
         self.preparationState = preparationState
         self.teachingMoment = teachingMoment
         self.canTakeBack = canTakeBack
@@ -169,6 +173,7 @@ struct CoachInspectorPresentationResolver {
         if snapshot.gameResult != .inProgress { return .completed }
         if snapshot.hasBlunderWarning { return .warning }
         if snapshot.teachingMoment != nil { return .lesson }
+        if snapshot.isHistoryPreviewActive { return .reviewing }
         return .live
     }
 
@@ -195,8 +200,12 @@ struct CoachInspectorPresentationResolver {
         case .lesson:
             status = "Teaching moment · paused"
             style = .teaching
+        case .reviewing:
+            status = "Reviewing earlier position"
+            style = .neutral
         case .live:
-            (status, style) = liveStatus(snapshot)
+            status = nil
+            style = .neutral
         }
 
         return CoachHeaderPresentation(
@@ -211,41 +220,12 @@ struct CoachInspectorPresentationResolver {
         )
     }
 
-    private func liveStatus(
-        _ snapshot: CoachInspectorSnapshot
-    ) -> (String?, CoachHeaderStyle) {
-        if snapshot.isEngineThinking {
-            return ("Computer thinking", .progress)
-        }
-
-        switch snapshot.preparationState {
-        case .idle:
-            if case .unavailable = snapshot.chatState {
-                return ("Coaching unavailable", .unavailable)
-            }
-            return (nil, .neutral)
-        case .analyzing:
-            return ("Analyzing position", .progress)
-        case .failed:
-            return ("Coaching unavailable", .unavailable)
-        case .ready(let prepared):
-            switch prepared.enhancement {
-            case .preparing:
-                return ("Hint ready · Coach polishing", .progress)
-            case .ready:
-                return ("Coach hint ready", .ready)
-            case .notConfigured, .unavailable:
-                return ("Stockfish hint ready", .ready)
-            }
-        }
-    }
-
     private func commands(
         for scene: CoachInspectorScene,
         snapshot: CoachInspectorSnapshot
     ) -> [CoachCommandPresentation] {
         switch scene {
-        case .neutral, .empty, .completed:
+        case .neutral, .empty, .reviewing, .completed:
             return []
         case .live:
             switch snapshot.preparationState {
@@ -253,7 +233,7 @@ struct CoachInspectorPresentationResolver {
                 return [
                     command(
                         .openHint,
-                        "Open Hint",
+                        "Hint",
                         systemImage: "lightbulb",
                         style: .primary
                     ),
@@ -262,13 +242,21 @@ struct CoachInspectorPresentationResolver {
                 return [
                     command(
                         .retryAnalysis,
-                        "Retry Analysis",
-                        systemImage: "arrow.clockwise",
+                        "Hint",
+                        systemImage: "lightbulb",
                         style: .primary
                     ),
                 ]
             case .idle, .analyzing:
-                return []
+                return [
+                    command(
+                        .openHint,
+                        "Hint",
+                        systemImage: "lightbulb",
+                        style: .primary,
+                        isEnabled: false
+                    ),
+                ]
             }
         case .warning:
             return [
@@ -375,7 +363,7 @@ struct CoachInspectorPresentationResolver {
         switch scene {
         case .live, .lesson:
             return true
-        case .neutral, .empty, .warning, .completed:
+        case .neutral, .empty, .reviewing, .warning, .completed:
             return false
         }
     }

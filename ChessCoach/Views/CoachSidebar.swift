@@ -1,65 +1,5 @@
 import SwiftUI
 
-enum CoachReadinessStatus: CaseIterable, Equatable, Sendable {
-    case analyzingPosition
-    case hintReadyCoachPolishing
-    case coachHintReady
-    case stockfishHintReady
-
-    var label: String {
-        switch self {
-        case .analyzingPosition:
-            "Analyzing position"
-        case .hintReadyCoachPolishing:
-            "Hint ready · Coach polishing"
-        case .coachHintReady:
-            "Coach hint ready"
-        case .stockfishHintReady:
-            "Stockfish hint ready"
-        }
-    }
-
-    var isWorking: Bool {
-        switch self {
-        case .analyzingPosition, .hintReadyCoachPolishing:
-            true
-        case .coachHintReady, .stockfishHintReady:
-            false
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .analyzingPosition:
-            .secondary
-        case .hintReadyCoachPolishing:
-            .blue
-        case .coachHintReady, .stockfishHintReady:
-            .coachGreen
-        }
-    }
-}
-
-struct CoachReadinessLabel: View {
-    let status: CoachReadinessStatus
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(
-                systemName: status.isWorking
-                    ? "ellipsis.circle.fill"
-                    : "checkmark.circle.fill"
-            )
-            Text(status.label)
-                .lineLimit(1)
-        }
-        .font(.caption2.weight(.semibold))
-        .foregroundStyle(status.tint)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(status.label)
-    }
-}
-
 /// Compatibility entry point retained for visual fixtures and downstream views.
 struct CoachSidebar: View {
     @Bindable var coordinator: GameCoordinator
@@ -67,13 +7,15 @@ struct CoachSidebar: View {
     var isGameContextVisible = true
     var embedsScrollableTimeline = true
     var initialRoutes: [CoachInspectorRoute] = []
+    var onConfigureInference: () -> Void = {}
 
     var body: some View {
         CoachInspectorContainer(
             coordinator: coordinator,
             inferenceSettings: inferenceSettings,
             isGameContextVisible: isGameContextVisible,
-            initialRoutes: initialRoutes
+            initialRoutes: initialRoutes,
+            onConfigureInference: onConfigureInference
         )
     }
 }
@@ -82,6 +24,7 @@ struct CoachInspectorContainer: View {
     @Bindable var coordinator: GameCoordinator
     @Bindable var inferenceSettings: InferenceSettings
     var isGameContextVisible = true
+    let onConfigureInference: () -> Void
 
     @State private var routePath: [CoachInspectorRoute] = []
     @State private var question = ""
@@ -91,11 +34,13 @@ struct CoachInspectorContainer: View {
         coordinator: GameCoordinator,
         inferenceSettings: InferenceSettings,
         isGameContextVisible: Bool = true,
-        initialRoutes: [CoachInspectorRoute] = []
+        initialRoutes: [CoachInspectorRoute] = [],
+        onConfigureInference: @escaping () -> Void = {}
     ) {
         self.coordinator = coordinator
         self.inferenceSettings = inferenceSettings
         self.isGameContextVisible = isGameContextVisible
+        self.onConfigureInference = onConfigureInference
         _routePath = State(initialValue: initialRoutes)
     }
 
@@ -125,6 +70,12 @@ struct CoachInspectorContainer: View {
         }
     }
 
+    private var inspectorHistoryItems: [CoachThreadItem] {
+        coordinator.status.result == .inProgress
+            ? historyItems
+            : projection.all
+    }
+
     private var snapshot: CoachInspectorSnapshot {
         CoachInspectorSnapshot(
             isCurrentGameVisible: isGameContextVisible,
@@ -132,12 +83,13 @@ struct CoachInspectorContainer: View {
             gameResult: coordinator.status.result,
             isEngineThinking: coordinator.isEngineThinking,
             hasBlunderWarning: coordinator.blunderWarning != nil,
+            isHistoryPreviewActive: coordinator.historyPreview != nil,
             preparationState: coordinator.coachPreparationState,
             teachingMoment: coordinator.teachingMoment,
             canTakeBack: coordinator.canTakeBack,
             chatState: coordinator.coachChatState,
             currentPositionTurnCount: currentConversationItems.count,
-            earlierItemCount: historyItems.count,
+            earlierItemCount: inspectorHistoryItems.count,
             hasPrincipalVariation: !preparedVariations.isEmpty,
             principalVariationMoveCount:
                 preparedVariations.first?.moves.count ?? 0
@@ -158,7 +110,7 @@ struct CoachInspectorContainer: View {
                 onSettings: { showsSettings.toggle() }
             )
             .popover(isPresented: $showsSettings, arrowEdge: .top) {
-                CoachSettingsPopover(inferenceSettings: inferenceSettings)
+                CoachSettingsPopover()
             }
 
             Divider()
@@ -181,24 +133,8 @@ struct CoachInspectorContainer: View {
                     destination(for: route)
                 }
             }
-
-            if shouldShowComposer {
-                Divider()
-                CoachComposer(
-                    question: $question,
-                    title: composerTitle,
-                    placeholder: composerPlaceholder,
-                    isWorking: coordinator.isCoachWorking,
-                    onSend: send
-                )
-            }
-
-            if isGameContextVisible, !coordinator.errorMessage.isEmpty {
-                Divider()
-                CoachInspectorNotice(
-                    text: coordinator.errorMessage,
-                    onDismiss: coordinator.clearError
-                )
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                inspectorFooter
             }
         }
         .background(.background)
@@ -217,6 +153,9 @@ struct CoachInspectorContainer: View {
         .onChange(of: coordinator.teachingMoment?.id) {
             routePath.removeAll()
         }
+        .onChange(of: coordinator.historyPreview?.id) {
+            routePath.removeAll()
+        }
         .onChange(of: previewVariationRank, initial: true) {
             guard let rank = previewVariationRank else {
                 if let index = routePath.lastIndex(where: {
@@ -230,6 +169,39 @@ struct CoachInspectorContainer: View {
             if !routePath.contains(route) {
                 routePath.append(route)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var inspectorFooter: some View {
+        let showsNotice =
+            isGameContextVisible && !coordinator.errorMessage.isEmpty
+        if shouldShowComposer || showsNotice {
+            VStack(spacing: 0) {
+                Divider()
+
+                if shouldShowComposer {
+                    CoachComposer(
+                        question: $question,
+                        title: composerTitle,
+                        placeholder: composerPlaceholder,
+                        isWorking: coordinator.isCoachWorking,
+                        onSend: send
+                    )
+                }
+
+                if showsNotice {
+                    if shouldShowComposer {
+                        Divider()
+                    }
+                    CoachInspectorNotice(
+                        text: coordinator.errorMessage,
+                        onDismiss: coordinator.clearError
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 
@@ -250,17 +222,15 @@ struct CoachInspectorContainer: View {
             )
         case .live:
             LiveCoachWorkspace(
-                preparationState: coordinator.coachPreparationState,
-                isEngineThinking: coordinator.isEngineThinking,
                 chatState: coordinator.coachChatState,
                 currentConversationCount: currentConversationItems.count,
-                historyCount: historyItems.count,
                 onConversation: {
                     routePath.append(.conversation(.currentPosition))
                 },
-                onHistory: showHistory,
-                onSettings: { showsSettings = true }
+                onConfigureInference: onConfigureInference
             )
+        case .reviewing:
+            HistoryReviewWorkspace()
         case .warning:
             BlunderGuardWorkspace(
                 warning: coordinator.blunderWarning,
@@ -279,8 +249,8 @@ struct CoachInspectorContainer: View {
             )
         case .completed:
             CoachCompletedWorkspace(
-                items: projection.all,
-                playerSide: coordinator.playerSide
+                itemCount: projection.all.count,
+                onHistory: showHistory
             )
         }
     }
@@ -298,7 +268,7 @@ struct CoachInspectorContainer: View {
             )
         case .history:
             CoachHistoryView(
-                items: historyItems,
+                items: inspectorHistoryItems,
                 playerSide: coordinator.playerSide,
                 onBack: popRoute
             )
@@ -588,8 +558,6 @@ private extension CoachThreadItem {
 }
 
 struct CoachSettingsPopover: View {
-    @Bindable var inferenceSettings: InferenceSettings
-
     @AppStorage(ChessBoardPreferences.moveMethodKey)
     private var moveMethod =
         ChessBoardPreferences.MoveMethod.clickAndDrag.rawValue
@@ -645,44 +613,10 @@ struct CoachSettingsPopover: View {
                     isOn: $defaultBlunderGuard
                 )
             }
-
-            Section("Model provider") {
-                LabeledContent("Model") {
-                    Text(inferenceSettings.modelID)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(inferenceSettings.modelID)
-                }
-                LabeledContent("Status") {
-                    Label(
-                        inferenceStatus,
-                        systemImage: inferenceSettings.hasStoredKey
-                            ? "checkmark.circle.fill"
-                            : "arrow.trianglehead.2.clockwise.rotate.90"
-                    )
-                    .foregroundStyle(
-                        inferenceSettings.hasStoredKey
-                            ? Color.green
-                            : Color.secondary
-                    )
-                }
-            }
         }
         .formStyle(.grouped)
         .frame(width: 350)
         .padding(.vertical, 8)
         .accessibilityLabel("Coach and board settings")
-    }
-
-    private var inferenceStatus: String {
-        if inferenceSettings.isWorking {
-            return "Connecting"
-        }
-        if !inferenceSettings.statusMessage.isEmpty {
-            return inferenceSettings.statusMessage
-        }
-        return inferenceSettings.hasStoredKey
-            ? "Configured"
-            : "Offline fallback"
     }
 }

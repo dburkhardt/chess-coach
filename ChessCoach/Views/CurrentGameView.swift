@@ -2,18 +2,23 @@ import SwiftUI
 
 struct CurrentGameView: View {
     @Bindable var coordinator: GameCoordinator
+    @State private var showsRewindConfirmation = false
+
     private let materialBalanceOverride: MaterialBalance?
+    private let capturedMaterialOverride: CapturedMaterialLedger?
     private let isCoachPresented: Bool
     private let onShowCoach: () -> Void
 
     init(
         coordinator: GameCoordinator,
         materialBalance: MaterialBalance? = nil,
+        capturedMaterial: CapturedMaterialLedger? = nil,
         isCoachPresented: Bool = true,
         onShowCoach: @escaping () -> Void = {}
     ) {
         self.coordinator = coordinator
         self.materialBalanceOverride = materialBalance
+        self.capturedMaterialOverride = capturedMaterial
         self.isCoachPresented = isCoachPresented
         self.onShowCoach = onShowCoach
     }
@@ -27,13 +32,20 @@ struct CurrentGameView: View {
             )
         } else {
             GeometryReader { geometry in
-                let layout = CurrentGameLayout(availableSize: geometry.size)
+                let layout = CurrentGameLayout(
+                    availableSize: geometry.size,
+                    showsGameOverPanel:
+                        coordinator.status.isFinished &&
+                        coordinator.historyPreview == nil
+                )
 
                 VStack(spacing: 0) {
                     PlayerStrip(
                         coordinator: coordinator,
                         materialBalance: materialBalanceOverride
                             ?? coordinator.displayedMaterialBalance,
+                        capturedMaterial: capturedMaterialOverride
+                            ?? coordinator.displayedCapturedMaterial,
                         isPreviewMaterial: coordinator.isTeachingPreviewActive
                     )
                         .frame(width: layout.stageWidth)
@@ -53,12 +65,37 @@ struct CurrentGameView: View {
                     .frame(width: layout.stageWidth)
                     .padding(.top, 11)
 
-                    BoardFooter(
-                        coordinator: coordinator,
-                        presentsCompactHistory: !layout.showsHistory
-                    )
-                    .frame(width: layout.stageWidth)
-                    .padding(.top, 8)
+                    if coordinator.historyPreview != nil {
+                        HistoryPreviewFooter(
+                            coordinator: coordinator,
+                            onConfirmRewind: {
+                                showsRewindConfirmation = true
+                            }
+                        )
+                        .frame(width: layout.stageWidth)
+                        .padding(.top, 8)
+                    } else if coordinator.status.isFinished {
+                        GameOverPanel(
+                            status: coordinator.status,
+                            playerSide: coordinator.playerSide,
+                            canReview:
+                                !(coordinator.activeGame?.sortedPlies.isEmpty
+                                    ?? true),
+                            onReview: {
+                                _ = coordinator.selectHistoryPreview(ply: 0)
+                            },
+                            onPlayAgain: coordinator.restart
+                        )
+                        .frame(width: layout.stageWidth)
+                        .padding(.top, 12)
+                    } else {
+                        BoardFooter(
+                            coordinator: coordinator,
+                            presentsCompactHistory: !layout.showsHistory
+                        )
+                        .frame(width: layout.stageWidth)
+                        .padding(.top, 8)
+                    }
                 }
                 .padding(CurrentGameLayout.contentPadding)
                 .frame(
@@ -68,6 +105,17 @@ struct CurrentGameView: View {
                 )
             }
             .navigationTitle("Current Game")
+            .alert(
+                rewindConfirmationTitle,
+                isPresented: $showsRewindConfirmation
+            ) {
+                Button("Cancel", role: .cancel) {}
+                Button("Go Back", role: .destructive) {
+                    _ = coordinator.rewindToHistoryPreview()
+                }
+            } message: {
+                Text(rewindConfirmationMessage)
+            }
             .overlay(alignment: .topTrailing) {
                 if coordinator.teachingMoment != nil, !isCoachPresented {
                     Button(action: onShowCoach) {
@@ -88,6 +136,23 @@ struct CurrentGameView: View {
             }
         }
     }
+
+    private var rewindConfirmationTitle: String {
+        coordinator.historyPreview?.selectedPly == 0
+            ? "Go back to the start?"
+            : "Go back to this move?"
+    }
+
+    private var rewindConfirmationMessage: String {
+        guard let preview = coordinator.historyPreview else {
+            return "The current game will remain unchanged."
+        }
+        let removed = max(0, preview.anchor.ply - preview.selectedPly)
+        let continuation = removed == 1
+            ? "1 later move"
+            : "\(removed) later moves"
+        return "This permanently discards \(continuation), reopens the game, and cannot be undone."
+    }
 }
 
 private struct CurrentGameLayout {
@@ -96,6 +161,7 @@ private struct CurrentGameLayout {
     static let maximumBoardSide: CGFloat = 680
     static let historyBreakpoint: CGFloat = 760
     static let verticalChrome: CGFloat = 118
+    static let gameOverChrome: CGFloat = 166
 
     var boardSide: CGFloat
     var showsHistory: Bool
@@ -104,7 +170,7 @@ private struct CurrentGameLayout {
         boardSide + (showsHistory ? Self.historyWidth + 16 : 0)
     }
 
-    init(availableSize: CGSize) {
+    init(availableSize: CGSize, showsGameOverPanel: Bool = false) {
         showsHistory = availableSize.width >= Self.historyBreakpoint
 
         let widthAllowance = availableSize.width
@@ -113,6 +179,7 @@ private struct CurrentGameLayout {
         let heightAllowance = availableSize.height
             - (Self.contentPadding * 2)
             - Self.verticalChrome
+            - (showsGameOverPanel ? Self.gameOverChrome : 0)
         boardSide = floor(
             max(280, min(widthAllowance, heightAllowance, Self.maximumBoardSide))
         )
@@ -122,7 +189,12 @@ private struct CurrentGameLayout {
 private struct PlayerStrip: View {
     @Bindable var coordinator: GameCoordinator
     let materialBalance: MaterialBalance
+    let capturedMaterial: CapturedMaterialLedger
     let isPreviewMaterial: Bool
+
+    @AppStorage(ChessBoardPreferences.pieceStyleKey)
+    private var pieceStyleRaw =
+        ChessBoardPreferences.PieceStyle.merida.rawValue
 
     var body: some View {
         HStack(spacing: 10) {
@@ -130,30 +202,42 @@ private struct PlayerStrip: View {
                 side: coordinator.playerSide.opposite,
                 name: "Computer",
                 detail: "Stockfish · Level \(coordinator.configuration.difficulty)",
-                milliseconds: coordinator.clocks.value(for: coordinator.playerSide.opposite),
+                milliseconds: coordinator.displayedClocks.value(
+                    for: coordinator.playerSide.opposite
+                ),
                 showsClock: coordinator.configuration.timeControl.usesClock,
-                active: coordinator.isEngineThinking
+                active: coordinator.isEngineThinking,
+                capturedPieces: capturedMaterial.pieces(
+                    capturedBy: coordinator.playerSide.opposite
+                ),
+                advantagePoints: advantagePoints(
+                    for: coordinator.playerSide.opposite
+                ),
+                pieceStyle: pieceStyle
             )
 
-            VStack(spacing: 3) {
-                Text("vs")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-                MaterialBalanceBadge(
-                    balance: materialBalance,
-                    playerSide: coordinator.playerSide,
-                    isPreview: isPreviewMaterial
-                )
-            }
+            Text("vs")
+                .font(.caption2.weight(.bold))
+                .foregroundStyle(.tertiary)
+                .textCase(.uppercase)
+                .accessibilityHidden(true)
 
             PlayerSummary(
                 side: coordinator.playerSide,
                 name: "You",
                 detail: coordinator.playerSide.displayName,
-                milliseconds: coordinator.clocks.value(for: coordinator.playerSide),
+                milliseconds: coordinator.displayedClocks.value(
+                    for: coordinator.playerSide
+                ),
                 showsClock: coordinator.configuration.timeControl.usesClock,
                 active: coordinator.canPlayerMove,
+                capturedPieces: capturedMaterial.pieces(
+                    capturedBy: coordinator.playerSide
+                ),
+                advantagePoints: advantagePoints(
+                    for: coordinator.playerSide
+                ),
+                pieceStyle: pieceStyle,
                 alignment: .trailing
             )
         }
@@ -166,6 +250,18 @@ private struct PlayerStrip: View {
         .shadow(color: .black.opacity(0.035), radius: 2, y: 1)
         .accessibilityElement(children: .contain)
     }
+
+    private var pieceStyle: ChessBoardPreferences.PieceStyle {
+        ChessBoardPreferences.PieceStyle(rawValue: pieceStyleRaw) ?? .merida
+    }
+
+    private func advantagePoints(for side: ChessSide) -> Int? {
+        guard case .ahead(let points) = materialBalance.advantage(for: side)
+        else {
+            return nil
+        }
+        return points
+    }
 }
 
 private struct PlayerSummary: View {
@@ -175,6 +271,9 @@ private struct PlayerSummary: View {
     var milliseconds: Int
     var showsClock: Bool
     var active: Bool
+    var capturedPieces: [CapturedPieceRecord]
+    var advantagePoints: Int?
+    var pieceStyle: ChessBoardPreferences.PieceStyle
     var alignment: HorizontalAlignment = .leading
 
     init(
@@ -184,6 +283,9 @@ private struct PlayerSummary: View {
         milliseconds: Int,
         showsClock: Bool,
         active: Bool,
+        capturedPieces: [CapturedPieceRecord] = [],
+        advantagePoints: Int? = nil,
+        pieceStyle: ChessBoardPreferences.PieceStyle = .merida,
         alignment: HorizontalAlignment = .leading
     ) {
         self.side = side
@@ -192,29 +294,64 @@ private struct PlayerSummary: View {
         self.milliseconds = milliseconds
         self.showsClock = showsClock
         self.active = active
+        self.capturedPieces = capturedPieces
+        self.advantagePoints = advantagePoints
+        self.pieceStyle = pieceStyle
         self.alignment = alignment
     }
 
     var body: some View {
-        HStack(spacing: 9) {
-            if alignment == .trailing {
-                clock
+        VStack(alignment: alignment, spacing: 3) {
+            HStack(spacing: 9) {
+                if alignment == .trailing {
+                    clock
+                }
+
+                pieceBadge
+
+                VStack(alignment: alignment, spacing: 1) {
+                    Text(name)
+                        .font(.subheadline.weight(.semibold))
+                    Text(detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                if alignment == .leading {
+                    Spacer(minLength: 4)
+                    clock
+                }
             }
 
-            pieceBadge
-
-            VStack(alignment: alignment, spacing: 1) {
-                Text(name)
-                    .font(.subheadline.weight(.semibold))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
-
-            if alignment == .leading {
-                Spacer(minLength: 4)
-                clock
+            if !capturedPieces.isEmpty || advantagePoints != nil {
+                HStack(spacing: 5) {
+                    if alignment == .trailing {
+                        Spacer(minLength: 0)
+                    }
+                    CapturedPieceStrip(
+                        pieces: capturedPieces,
+                        style: pieceStyle
+                    )
+                    if let advantagePoints {
+                        Text("+\(advantagePoints)")
+                            .font(
+                                .system(
+                                    .caption2,
+                                    design: .monospaced,
+                                    weight: .bold
+                                )
+                            )
+                            .foregroundStyle(.secondary)
+                            .help(
+                                "\(side.displayName) leads by \(advantagePoints) material \(advantagePoints == 1 ? "point" : "points")"
+                            )
+                    }
+                    if alignment == .leading {
+                        Spacer(minLength: 0)
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
         }
         .frame(maxWidth: .infinity, alignment: alignment == .leading ? .leading : .trailing)
@@ -253,6 +390,38 @@ private struct PlayerSummary: View {
             return String(format: "0:%04.1f", Double(clamped) / 1_000)
         }
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+private struct CapturedPieceStrip: View {
+    let pieces: [CapturedPieceRecord]
+    let style: ChessBoardPreferences.PieceStyle
+
+    var body: some View {
+        HStack(spacing: -5) {
+            ForEach(pieces) { captured in
+                ChessPieceArtwork(
+                    piece: BoardPiece(
+                        square: "a1",
+                        side: captured.side,
+                        kind: captured.kind
+                    ),
+                    style: style
+                )
+                .frame(width: 16, height: 16)
+                .saturation(0.2)
+                .opacity(0.52)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        guard !pieces.isEmpty else { return "No captured pieces" }
+        let names = pieces.map(\.accessibilityName)
+        return "Captured \(names.joined(separator: ", "))"
     }
 }
 
@@ -310,6 +479,132 @@ struct MaterialBalanceBadge: View {
 
     private var backgroundColor: Color {
         foregroundColor.opacity(0.12)
+    }
+}
+
+private struct HistoryPreviewFooter: View {
+    @Bindable var coordinator: GameCoordinator
+    let onConfirmRewind: () -> Void
+
+    var body: some View {
+        VStack(spacing: 9) {
+            HStack(spacing: 8) {
+                Label(selectedPositionLabel, systemImage: "clock.arrow.circlepath")
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Text("\(selectedPly) of \(totalPlies)")
+                    .font(.system(.caption2, design: .monospaced))
+                    .foregroundStyle(.secondary)
+            }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 7) {
+                    previousButton
+                    nextButton
+                    returnToLiveButton
+
+                    Spacer(minLength: 8)
+
+                    rewindButton
+                }
+
+                VStack(spacing: 7) {
+                    HStack(spacing: 7) {
+                        previousButton
+                            .labelStyle(.iconOnly)
+                        nextButton
+                            .labelStyle(.iconOnly)
+                        returnToLiveButton
+                        Spacer(minLength: 4)
+                    }
+                    rewindButton
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(11)
+        .background(
+            Color.accentColor.opacity(0.07),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.accentColor.opacity(0.22), lineWidth: 1)
+        }
+        .onExitCommand {
+            coordinator.returnToLivePosition()
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "Reviewing \(selectedPositionLabel), move \(selectedPly) of \(totalPlies)"
+        )
+    }
+
+    private var selectedPly: Int {
+        coordinator.historyPreview?.selectedPly ?? totalPlies
+    }
+
+    private var totalPlies: Int {
+        coordinator.activeGame?.sortedPlies.count ?? 0
+    }
+
+    private var previousButton: some View {
+        Button {
+            _ = coordinator.stepHistoryPreview(by: -1)
+        } label: {
+            Label("Previous", systemImage: "chevron.left")
+        }
+        .disabled(selectedPly == 0)
+        .help("Show the previous position")
+    }
+
+    private var nextButton: some View {
+        Button {
+            _ = coordinator.stepHistoryPreview(by: 1)
+        } label: {
+            Label("Next", systemImage: "chevron.right")
+        }
+        .disabled(selectedPly >= totalPlies)
+        .help("Show the next position")
+    }
+
+    private var returnToLiveButton: some View {
+        Button {
+            coordinator.returnToLivePosition()
+        } label: {
+            Label("Return to Live", systemImage: "forward.end")
+        }
+        .help("Return to the current position without changing the game")
+    }
+
+    private var rewindButton: some View {
+        Button(
+            selectedPly == 0
+                ? "Go Back to Start…"
+                : "Go Back to This Move…",
+            role: .destructive,
+            action: onConfirmRewind
+        )
+        .help("Discard the later continuation after confirmation")
+    }
+
+    private var selectedPositionLabel: String {
+        guard selectedPly > 0,
+              let plies = coordinator.activeGame?.sortedPlies,
+              plies.indices.contains(selectedPly - 1)
+        else {
+            return "Start position"
+        }
+        let ply = plies[selectedPly - 1]
+        let number = (selectedPly + 1) / 2
+        return ply.side == .white
+            ? "After \(number). \(ply.san)"
+            : "After \(number)… \(ply.san)"
     }
 }
 
@@ -395,6 +690,7 @@ private struct MoveHistoryView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
+                    let plies = coordinator.activeGame?.sortedPlies ?? []
                     LazyVGrid(
                         columns: [
                             GridItem(.fixed(25), alignment: .trailing),
@@ -404,19 +700,61 @@ private struct MoveHistoryView: View {
                         alignment: .leading,
                         spacing: 7
                     ) {
-                        ForEach(coordinator.moveRows, id: \.number) { row in
-                            Text("\(row.number).")
+                        ForEach(
+                            Array(stride(from: 0, to: plies.count, by: 2)),
+                            id: \.self
+                        ) { index in
+                            Text("\(index / 2 + 1).")
                                 .foregroundStyle(.tertiary)
-                            Text(row.white)
-                                .fontWeight(.semibold)
-                            Text(row.black)
-                                .fontWeight(.semibold)
+
+                            historyButton(for: plies[index])
+
+                            if plies.indices.contains(index + 1) {
+                                historyButton(for: plies[index + 1])
+                            } else {
+                                Color.clear
+                                    .frame(height: 20)
+                            }
                         }
                     }
                     .font(.system(.caption, design: .monospaced))
                     .padding(12)
                 }
             }
+
+            Divider()
+
+            HStack(spacing: 5) {
+                Button {
+                    showPreviousPosition()
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .disabled((coordinator.activeGame?.sortedPlies.isEmpty) != false)
+                .help("Previous position")
+
+                Button {
+                    _ = coordinator.stepHistoryPreview(by: 1)
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .disabled(coordinator.historyPreview == nil)
+                .help("Next position")
+
+                Spacer(minLength: 2)
+
+                Button {
+                    coordinator.returnToLivePosition()
+                } label: {
+                    Image(systemName: "forward.end")
+                }
+                .disabled(coordinator.historyPreview == nil)
+                .help("Return to live position")
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .padding(.horizontal, 10)
+            .frame(height: 34)
         }
         .background(.background, in: RoundedRectangle(cornerRadius: 12))
         .overlay {
@@ -426,6 +764,41 @@ private struct MoveHistoryView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Move history")
     }
+
+    private func showPreviousPosition() {
+        if coordinator.historyPreview != nil {
+            _ = coordinator.stepHistoryPreview(by: -1)
+            return
+        }
+        let count = coordinator.activeGame?.sortedPlies.count ?? 0
+        guard count > 0 else { return }
+        _ = coordinator.selectHistoryPreview(ply: max(0, count - 1))
+    }
+
+    private func historyButton(for ply: SavedPly) -> some View {
+        let selected = coordinator.historyPreview?.selectedPly == ply.index + 1
+        return Button {
+            _ = coordinator.selectHistoryPreview(ply: ply.index + 1)
+        } label: {
+            Text(ply.san)
+                .fontWeight(.semibold)
+                .lineLimit(1)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    selected
+                        ? Color.accentColor.opacity(0.15)
+                        : Color.clear,
+                    in: RoundedRectangle(cornerRadius: 5)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            "Move \(ply.index + 1), \(ply.san)"
+        )
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
 }
 
 private struct CompactMoveHistoryMenu: View {
@@ -433,11 +806,20 @@ private struct CompactMoveHistoryMenu: View {
 
     var body: some View {
         Menu {
-            if coordinator.moveRows.isEmpty {
+            let plies = coordinator.activeGame?.sortedPlies ?? []
+            if plies.isEmpty {
                 Text("No moves yet")
             } else {
-                ForEach(coordinator.moveRows, id: \.number) { row in
-                    Text("\(row.number). \(row.white) \(row.black)")
+                Button("Start position") {
+                    _ = coordinator.selectHistoryPreview(ply: 0)
+                }
+                Divider()
+                ForEach(plies) { ply in
+                    Button(moveLabel(for: ply)) {
+                        _ = coordinator.selectHistoryPreview(
+                            ply: ply.index + 1
+                        )
+                    }
                 }
             }
         } label: {
@@ -449,6 +831,13 @@ private struct CompactMoveHistoryMenu: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Show move history")
+    }
+
+    private func moveLabel(for ply: SavedPly) -> String {
+        let number = ply.index / 2 + 1
+        return ply.side == .white
+            ? "\(number). \(ply.san)"
+            : "\(number)… \(ply.san)"
     }
 }
 

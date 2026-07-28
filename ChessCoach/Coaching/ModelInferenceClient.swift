@@ -20,13 +20,13 @@ enum InferenceError: LocalizedError, Equatable, Sendable {
         case .invalidEndpoint:
             "The model endpoint is invalid."
         case .missingKey:
-            "Add an API key in Settings."
+            "Add an inference key in Settings."
         case .missingModel:
             "Choose or enter a model in Settings."
         case .invalidCredentials:
-            "The API key was not accepted."
+            "The inference key was not accepted."
         case .modelAccessDenied(let model, _):
-            "Your key is valid but does not have access to \(model)."
+            "Your inference key is valid but does not have access to \(model)."
         case .timeout:
             "Model inference timed out. Stockfish coaching is still available."
         case .offline:
@@ -1140,15 +1140,17 @@ struct ModelInferenceClient: Sendable {
         _ configuration: InferenceConfiguration,
         credential: String
     ) throws -> (configuration: InferenceConfiguration, credential: String) {
+        let credential = credential.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
+        if configuration.provider.requiresCredential, credential.isEmpty {
+            throw InferenceError.missingKey
+        }
         let endpoint = configuration.trimmedBaseURL
         guard self.endpoint(baseURL: endpoint, path: "") != nil else {
             throw InferenceError.invalidEndpoint
         }
         let model = try normalizedModel(configuration.modelID)
-        let credential = credential.trimmingCharacters(in: .whitespacesAndNewlines)
-        if configuration.provider.requiresCredential, credential.isEmpty {
-            throw InferenceError.missingKey
-        }
         return (
             InferenceConfiguration(
                 provider: configuration.provider,

@@ -7,22 +7,25 @@ struct RootView: View {
     private var isCoachInspectorPresented = true
 
     var body: some View {
-        NavigationSplitView {
-            List(AppSection.allCases, selection: $model.selection) { section in
-                Label(section.title, systemImage: section.systemImage)
-                    .tag(section)
+        HStack(spacing: 0) {
+            AppNavigationSidebar(selection: $model.selection)
+                .frame(width: AppNavigationSidebarMetrics.idealWidth)
+                .background(.bar)
+                .accessibilityIdentifier("app-navigation-column")
+
+            Divider()
+
+            NavigationStack {
+                content
+                    .frame(minWidth: 620)
             }
-            .navigationTitle("Chess Coach")
-            .navigationSplitViewColumnWidth(min: 180, ideal: 210, max: 250)
-        } detail: {
-            content
-                .frame(minWidth: 620)
         }
         .inspector(isPresented: $isCoachInspectorPresented) {
             CoachInspectorContainer(
                 coordinator: model.coordinator,
                 inferenceSettings: model.inferenceSettings,
-                isGameContextVisible: model.selection == .currentGame
+                isGameContextVisible: model.selection == .currentGame,
+                onConfigureInference: model.openInferenceSettings
             )
             .inspectorColumnWidth(min: 300, ideal: 360, max: 460)
         }

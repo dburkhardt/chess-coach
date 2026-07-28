@@ -49,6 +49,29 @@ enum InferenceAPIMode: String, CaseIterable, Codable, Identifiable, Sendable {
     }
 }
 
+enum InferenceCredentialState: Equatable, Sendable {
+    case missing
+    case sessionOnly
+    case stored
+}
+
+enum InferenceConfigurationIssue: Equatable, Sendable {
+    case missingKey
+    case missingEndpoint
+    case missingModel
+
+    var message: String {
+        switch self {
+        case .missingKey:
+            "No inference key configured."
+        case .missingEndpoint:
+            "No inference endpoint configured."
+        case .missingModel:
+            "No inference model configured."
+        }
+    }
+}
+
 struct InferenceConfiguration: Equatable, Sendable {
     var provider: InferenceProviderKind
     var baseURL: String
@@ -75,7 +98,10 @@ final class InferenceSettings {
     }
 
     var provider: InferenceProviderKind {
-        didSet { defaults.set(provider.rawValue, forKey: Keys.provider) }
+        didSet {
+            defaults.set(provider.rawValue, forKey: Keys.provider)
+            loadStoredKeyIfNeeded(for: provider)
+        }
     }
     var customEndpoint: String {
         didSet { defaults.set(customEndpoint, forKey: Keys.customEndpoint) }
@@ -90,8 +116,15 @@ final class InferenceSettings {
     var statusMessage = ""
     var isWorking = false
 
+    private(set) var credentialPersistenceAvailability:
+        CredentialPersistenceAvailability
+    private(set) var credentialStoreError: String?
+
     private let defaults: UserDefaults
     private let keychain: any KeychainStoring
+    private var storedKeys: [InferenceProviderKind: String] = [:]
+    private var sessionKeys: [InferenceProviderKind: String] = [:]
+    private var loadedProviders: Set<InferenceProviderKind> = []
 
     init(
         defaults: UserDefaults = .standard,
@@ -99,6 +132,8 @@ final class InferenceSettings {
     ) {
         self.defaults = defaults
         self.keychain = keychain
+        self.credentialPersistenceAvailability =
+            keychain.persistenceAvailability
         self.provider = InferenceProviderKind(
             rawValue: defaults.string(forKey: Keys.provider) ?? ""
         ) ?? .openAI
@@ -107,6 +142,7 @@ final class InferenceSettings {
         self.apiMode = InferenceAPIMode(
             rawValue: defaults.string(forKey: Keys.apiMode) ?? ""
         ) ?? .automatic
+        loadStoredKeyIfNeeded(for: provider)
     }
 
     var configuration: InferenceConfiguration {
@@ -118,42 +154,127 @@ final class InferenceSettings {
         )
     }
 
-    func existingKey(for provider: InferenceProviderKind? = nil) -> String {
+    var credentialState: InferenceCredentialState {
+        credentialState(for: provider)
+    }
+
+    func credentialState(
+        for provider: InferenceProviderKind
+    ) -> InferenceCredentialState {
+        loadStoredKeyIfNeeded(for: provider)
+        if !(sessionKeys[provider] ?? "").isEmpty {
+            return .sessionOnly
+        }
+        if !(storedKeys[provider] ?? "").isEmpty {
+            return .stored
+        }
+        return .missing
+    }
+
+    func existingKey(
+        for provider: InferenceProviderKind? = nil
+    ) -> String {
         let selectedProvider = provider ?? self.provider
-        return (try? keychain.read(account: selectedProvider.rawValue)) ?? ""
+        loadStoredKeyIfNeeded(for: selectedProvider)
+        let session = sessionKeys[selectedProvider] ?? ""
+        return session.isEmpty
+            ? storedKeys[selectedProvider] ?? ""
+            : session
     }
 
     var hasStoredKey: Bool {
-        !existingKey().isEmpty
+        loadStoredKeyIfNeeded(for: provider)
+        return !(storedKeys[provider] ?? "").isEmpty
+    }
+
+    var hasSessionKey: Bool {
+        !(sessionKeys[provider] ?? "").isEmpty
+    }
+
+    var configurationIssue: InferenceConfigurationIssue? {
+        if provider.requiresCredential, existingKey().isEmpty {
+            return .missingKey
+        }
+        let configuration = configuration
+        if configuration.trimmedBaseURL.isEmpty {
+            return .missingEndpoint
+        }
+        if configuration.trimmedModelID.isEmpty {
+            return .missingModel
+        }
+        return nil
     }
 
     var isConfigured: Bool {
-        let configuration = configuration
-        guard !configuration.trimmedBaseURL.isEmpty,
-              !configuration.trimmedModelID.isEmpty
-        else {
-            return false
-        }
-        return !provider.requiresCredential || hasStoredKey
+        configurationIssue == nil
     }
 
-    func saveKey(_ key: String) throws {
+    func useKeyForSession(_ key: String) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessionKeys[provider] = trimmed.isEmpty ? nil : trimmed
+        credentialStoreError = nil
+    }
+
+    func clearSessionKey() {
+        sessionKeys[provider] = nil
+    }
+
+    func savePersistentKey(_ key: String) throws {
+        guard credentialPersistenceAvailability == .persistent else {
+            throw KeychainError.installedSignedAppRequired
+        }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             try keychain.delete(account: provider.rawValue)
+            storedKeys[provider] = nil
         } else {
             try keychain.save(trimmed, account: provider.rawValue)
+            storedKeys[provider] = trimmed
+        }
+        sessionKeys[provider] = nil
+        loadedProviders.insert(provider)
+        credentialStoreError = nil
+    }
+
+    /// Compatibility entry point. Development and relocated builds retain the
+    /// key for this process only; the installed signed app stores it in Keychain.
+    func saveKey(_ key: String) throws {
+        if credentialPersistenceAvailability == .persistent {
+            try savePersistentKey(key)
+        } else {
+            useKeyForSession(key)
         }
     }
 
     func removeKey() throws {
-        try keychain.delete(account: provider.rawValue)
+        if credentialPersistenceAvailability == .persistent {
+            try keychain.delete(account: provider.rawValue)
+        }
+        storedKeys[provider] = nil
+        sessionKeys[provider] = nil
+        loadedProviders.insert(provider)
+        credentialStoreError = nil
     }
 
-    /// A newly typed key wins over the stored key. This lets Settings and
-    /// onboarding validate credentials before saving them to Keychain.
+    /// A newly typed key wins over the session key, which wins over the stored
+    /// key. This lets Settings and onboarding test credentials without saving.
     func keyForRequest(typedKey: String) -> String {
         let trimmed = typedKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? existingKey() : trimmed
+    }
+
+    private func loadStoredKeyIfNeeded(
+        for provider: InferenceProviderKind
+    ) {
+        guard loadedProviders.insert(provider).inserted else { return }
+        guard credentialPersistenceAvailability == .persistent else { return }
+        do {
+            storedKeys[provider] =
+                (try keychain.read(account: provider.rawValue)) ?? ""
+        } catch {
+            storedKeys[provider] = nil
+            credentialStoreError = error.localizedDescription
+            credentialPersistenceAvailability = .sessionOnly
+        }
     }
 }

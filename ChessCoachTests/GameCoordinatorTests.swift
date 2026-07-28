@@ -119,6 +119,37 @@ struct GameCoordinatorTests {
         #expect(harness.coordinator.state.plyCount == 0)
     }
 
+    @Test func finishingAGameResumesEarlierPendingReviews() async throws {
+        let harness = try makeHarness()
+        let configuration = NewGameConfiguration(
+            colorChoice: .white,
+            difficulty: 4,
+            timeControl: .none,
+            blunderGuardEnabled: false
+        )
+        let earlier = harness.persistence.createGame(
+            configuration: configuration,
+            playerSide: .white,
+            initialFEN: ChessGameState.standardInitialFEN
+        )
+        earlier.result = .whiteWon
+        earlier.endReason = .checkmate
+        earlier.endedAt = Date(timeIntervalSince1970: 100)
+        harness.persistence.save()
+        harness.persistence.refreshGames()
+
+        harness.coordinator.newGame(configuration)
+        harness.coordinator.resign()
+
+        try await eventually {
+            earlier.reviewCompleted && earlier.profileIncorporated
+        }
+        #expect(
+            !harness.persistence.pendingReviewGames.map(\.id)
+                .contains(earlier.id)
+        )
+    }
+
     @Test func timeoutEndsGameAndPreventsFurtherMoves() async throws {
         let clock = ManualGameClock()
         let harness = try makeHarness(clock: clock)
@@ -1254,6 +1285,267 @@ struct GameCoordinatorTests {
                 $0.text == "Plan: Develop, control the center, and castle."
             } == true
         )
+    }
+
+    @Test func historyPreviewBrowsingDoesNotMutateLiveGame() async throws {
+        let opponent = ScriptedEngine(opponentMoves: ["e7e5", "b8c6"])
+        let harness = try makeHarness(opponent: opponent)
+        harness.coordinator.newGame(
+            NewGameConfiguration(
+                colorChoice: .white,
+                difficulty: 4,
+                timeControl: .none,
+                blunderGuardEnabled: false
+            )
+        )
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+        play("g1", "f3", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 4 }
+
+        let game = try #require(harness.coordinator.activeGame)
+        let liveFEN = harness.coordinator.state.fen
+        let liveMoves = harness.coordinator.state.uciMoves
+        let liveClocks = harness.coordinator.clocks
+        let liveClockSide = harness.coordinator.activeClockSide
+        let livePGN = game.pgn
+        let liveRevision = harness.coordinator.boardPositionRevision
+
+        #expect(harness.coordinator.selectHistoryPreview(ply: 2))
+        #expect(harness.coordinator.historyPreview?.selectedPly == 2)
+        #expect(!harness.coordinator.canPlayerMove)
+        #expect(harness.coordinator.stepHistoryPreview(by: -1))
+        #expect(harness.coordinator.historyPreview?.selectedPly == 1)
+        #expect(harness.coordinator.stepHistoryPreview(by: 1))
+        #expect(harness.coordinator.historyPreview?.selectedPly == 2)
+
+        #expect(harness.coordinator.state.fen == liveFEN)
+        #expect(harness.coordinator.state.uciMoves == liveMoves)
+        #expect(harness.coordinator.clocks == liveClocks)
+        #expect(harness.coordinator.activeClockSide == liveClockSide)
+        #expect(harness.coordinator.boardPositionRevision == liveRevision)
+        #expect(game.sortedPlies.count == 4)
+        #expect(game.pgn == livePGN)
+        #expect(!game.assistanceUsed)
+        #expect(game.assistanceEvents.isEmpty)
+
+        harness.coordinator.returnToLivePosition()
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(harness.coordinator.canPlayerMove)
+        #expect(game.sortedPlies.count == 4)
+    }
+
+    @Test func confirmedHistoryRewindRestoresAndPersistsSelectedPosition() async throws {
+        let opponent = ScriptedEngine(opponentMoves: ["e7e5", "b8c6"])
+        let clock = ManualGameClock()
+        let harness = try makeHarness(opponent: opponent, clock: clock)
+        harness.coordinator.newGame(
+            NewGameConfiguration(
+                colorChoice: .white,
+                difficulty: 4,
+                timeControl: .rapid10,
+                blunderGuardEnabled: false
+            )
+        )
+        await drainTasks()
+        await clock.advance(by: 2_000)
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+
+        let game = try #require(harness.coordinator.activeGame)
+        let selectedClock = try #require(game.sortedPlies.last?.clockAfter)
+        let selectedFEN = try #require(game.sortedPlies.last?.fenAfter)
+        await clock.advance(by: 3_000)
+        play("g1", "f3", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 4 }
+
+        let keptMessage = CoachMessage(
+            role: .coach,
+            text: "Keep this position note.",
+            ply: 2,
+            positionFEN: selectedFEN
+        )
+        let discardedMessage = CoachMessage(
+            role: .coach,
+            text: "Discard this continuation note.",
+            ply: 4,
+            positionFEN: harness.coordinator.state.fen
+        )
+        harness.persistence.append(keptMessage, to: game)
+        harness.persistence.append(discardedMessage, to: game)
+        harness.coordinator.resume(game: game)
+        #expect(harness.coordinator.coachMessages.count == 2)
+
+        let liveRevision = harness.coordinator.boardPositionRevision
+        let liveClock = harness.coordinator.clocks
+        #expect(harness.coordinator.selectHistoryPreview(ply: 2))
+        // Reviewing during a live game keeps its authoritative countdown
+        // visible. Confirming the rewind still restores the selected snapshot.
+        #expect(harness.coordinator.displayedClocks == liveClock)
+        #expect(harness.coordinator.clocks == liveClock)
+        #expect(game.sortedPlies.count == 4)
+        #expect(harness.coordinator.rewindToHistoryPreview())
+
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(harness.coordinator.boardPositionRevision == liveRevision + 1)
+        #expect(harness.coordinator.state.plyCount == 2)
+        #expect(harness.coordinator.state.uciMoves == ["e2e4", "e7e5"])
+        #expect(harness.coordinator.state.fen == selectedFEN)
+        #expect(harness.coordinator.clocks == selectedClock)
+        #expect(harness.coordinator.activeClockSide == .white)
+        #expect(harness.coordinator.status.result == .inProgress)
+
+        #expect(game.sortedPlies.map(\.uci) == ["e2e4", "e7e5"])
+        #expect(game.currentFEN == selectedFEN)
+        #expect(game.result == .inProgress)
+        #expect(game.endReason == .none)
+        #expect(game.endedAt == nil)
+        #expect(!game.reviewCompleted)
+        #expect(game.assistanceUsed)
+        #expect(
+            game.assistanceEvents.contains {
+                $0.kind == .takeBack && $0.ply == 2
+            }
+        )
+        #expect(game.coachMessages.map(\.text) == ["Keep this position note."])
+        #expect(
+            harness.coordinator.coachMessages.map(\.text)
+                == ["Keep this position note."]
+        )
+        #expect(game.pgn.contains("e4 e5"))
+        #expect(!game.pgn.contains("Nf3"))
+        #expect(!game.pgn.contains("Nc6"))
+    }
+
+    @Test func completedHistoryReviewProjectsSelectedClockSnapshot() async throws {
+        let opponent = ScriptedEngine(opponentMoves: ["e7e5"])
+        let clock = ManualGameClock()
+        let harness = try makeHarness(opponent: opponent, clock: clock)
+        harness.coordinator.newGame(
+            NewGameConfiguration(
+                colorChoice: .white,
+                difficulty: 4,
+                timeControl: .rapid10,
+                blunderGuardEnabled: false
+            )
+        )
+
+        await drainTasks()
+        await clock.advance(by: 2_000)
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+
+        let game = try #require(harness.coordinator.activeGame)
+        let selectedClock = try #require(
+            game.sortedPlies.first?.clockAfter
+        )
+        await clock.advance(by: 3_000)
+        harness.coordinator.resign()
+        let completedClock = harness.coordinator.clocks
+        #expect(completedClock != selectedClock)
+
+        #expect(harness.coordinator.selectHistoryPreview(ply: 1))
+        #expect(harness.coordinator.displayedClocks == selectedClock)
+        #expect(harness.coordinator.clocks == completedClock)
+    }
+
+    @Test func historyRewindReopensCompletedGameAndRestartsOpponentTurn() async throws {
+        let opponent = BlockingOpponentEngine()
+        let harness = try makeHarness(opponent: opponent)
+        harness.coordinator.newGame(
+            NewGameConfiguration(
+                colorChoice: .white,
+                difficulty: 4,
+                timeControl: .none,
+                blunderGuardEnabled: false
+            )
+        )
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 1 }
+        await opponent.completeNext(with: "e7e5")
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+
+        let game = try #require(harness.coordinator.activeGame)
+        harness.coordinator.resign()
+        #expect(harness.coordinator.status.result == .blackWon)
+        #expect(game.endedAt != nil)
+        game.reviewCompleted = true
+        game.profileIncorporated = true
+        LearnerProfileService().incorporate(
+            game: game,
+            into: harness.persistence.profile
+        )
+        harness.persistence.save()
+        #expect(harness.persistence.profile.reviewedGames == 1)
+        #expect(harness.coordinator.selectHistoryPreview(ply: 1))
+        #expect(harness.coordinator.rewindToHistoryPreview())
+
+        #expect(harness.coordinator.state.uciMoves == ["e2e4"])
+        #expect(harness.coordinator.state.sideToMove == .black)
+        #expect(harness.coordinator.status.result == .inProgress)
+        #expect(game.result == .inProgress)
+        #expect(game.endReason == .none)
+        #expect(game.endedAt == nil)
+        #expect(!game.reviewCompleted)
+        #expect(!game.profileIncorporated)
+        #expect(harness.persistence.profile.reviewedGames == 0)
+        #expect(harness.coordinator.isEngineThinking)
+        #expect(harness.coordinator.activeClockSide == nil)
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(game.assistanceUsed)
+        #expect(
+            game.assistanceEvents.contains {
+                $0.kind == .takeBack && $0.ply == 1
+            }
+        )
+
+        try await eventually {
+            harness.coordinator.isEngineThinking
+        }
+        await opponent.completeNext(with: "c7c5")
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+        #expect(harness.coordinator.state.uciMoves == ["e2e4", "c7c5"])
+        #expect(harness.coordinator.state.sideToMove == .white)
+        #expect(harness.coordinator.activeClockSide == .white)
+    }
+
+    @Test func historyRewindRejectsInvalidAndStaleSelections() async throws {
+        let opponent = BlockingOpponentEngine()
+        let harness = try makeHarness(opponent: opponent)
+        harness.coordinator.newGame(
+            NewGameConfiguration(
+                colorChoice: .white,
+                difficulty: 4,
+                timeControl: .none,
+                blunderGuardEnabled: false
+            )
+        )
+
+        #expect(!harness.coordinator.selectHistoryPreview(ply: -1))
+        #expect(!harness.coordinator.selectHistoryPreview(ply: 1))
+        #expect(harness.coordinator.selectHistoryPreview(ply: 0))
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(!harness.coordinator.rewindToHistoryPreview())
+
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.state.plyCount == 1 }
+        #expect(harness.coordinator.selectHistoryPreview(ply: 0))
+        #expect(harness.coordinator.historyPreview != nil)
+
+        await opponent.completeNext(with: "e7e5")
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(!harness.coordinator.rewindToHistoryPreview())
+        #expect(!harness.coordinator.selectHistoryPreview(ply: -1))
+        #expect(!harness.coordinator.selectHistoryPreview(ply: 3))
+        #expect(harness.coordinator.selectHistoryPreview(ply: 2))
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(!harness.coordinator.rewindToHistoryPreview())
+
+        #expect(harness.coordinator.selectHistoryPreview(ply: 1))
+        harness.coordinator.restart()
+        #expect(harness.coordinator.historyPreview == nil)
+        #expect(!harness.coordinator.rewindToHistoryPreview())
     }
 
     private func makeHarness(

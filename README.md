@@ -1,17 +1,17 @@
 # Chess Coach
 
 Chess Coach is a native macOS training app that pairs local Stockfish analysis
-with grounded, position-aware explanations from OpenAI or a custom
-OpenAI-compatible model endpoint.
+with grounded, position-aware explanations from a user-selected inference
+provider.
 
-Current prerelease: **0.1.0-beta.6**
+Current prerelease: **0.1.0-beta.8**
 
 ## Requirements
 
 - Apple silicon Mac running macOS 26 or later
 - Xcode 26
-- Optional: an API key for OpenAI, or an endpoint, model ID, and optional API
-  key for a custom OpenAI-compatible service
+- Optional: an inference provider configuration with a model ID and, when
+  required by that provider, an inference key
 
 ## Build
 
@@ -64,8 +64,10 @@ ratings.
 
 Games and the learner profile are stored locally with SwiftData. If a model
 provider is configured, that provider receives the current coaching context
-for background hint preparation and explicit chat requests. API credentials
-are stored in macOS Keychain under provider-specific accounts. The app has no
+for background hint preparation and explicit chat requests. Inference keys
+are stored in macOS Keychain under provider-specific accounts by the signed
+app installed in Applications; development and relocated builds keep them only
+for the current session. The app has no
 accounts, telemetry, ads, or cloud sync.
 
 Review the privacy and data-handling terms of any provider you configure.
@@ -80,10 +82,14 @@ profile. Supply all three explicitly:
 DEVELOPER_ID_APPLICATION="Developer ID Application: Your Name (TEAMID)" \
 DEVELOPMENT_TEAM="TEAMID" \
 NOTARYTOOL_PROFILE="your-profile" \
-./scripts/release.sh
+./scripts/release.sh prepare
 ```
 
-The script creates and verifies `dist/Chess-Coach-0.1.0-beta.6.dmg`. No packaged
+Preparation builds, tests, signs, and captures the exact candidate without
+installing it. Review and approve the generated contact sheet, then run
+`./scripts/release.sh publish` with the same environment to package, notarize,
+verify, install, and launch `dist/Chess-Coach-0.1.0-beta.8.dmg`. See
+[`docs/RELEASE.md`](docs/RELEASE.md) for the complete gated flow. No packaged
 binary is part of this source release.
 
 The app icon is reproducible with:
