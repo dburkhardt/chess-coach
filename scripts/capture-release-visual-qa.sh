@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/visual-qa-lib.sh"
+source "${SCRIPT_DIR}/release-gui-session-lib.sh"
 
 APP_PATH=""
 REPLACE=0
@@ -130,11 +131,14 @@ cleanup() {
     wait "${CAPTURE_OPEN_PID}" >/dev/null 2>&1 || true
   fi
   stop_candidate_session
+  release_gui_session_lock_release
   [[ -d "${TEMP_DIR}" ]] && rm -rf "${TEMP_DIR}"
   trap - EXIT
   exit "${original_exit_code}"
 }
 trap 'cleanup $?' EXIT
+release_gui_session_lock_acquire foreground ||
+  visual_qa_die "Another Chess Coach foreground QA/preview session is active."
 
 if [[ -n "$(installed_app_pids)" ]]; then
   print "Requesting the installed Chess Coach to quit cleanly for visual capture..."

@@ -245,18 +245,20 @@ struct ReleaseVisualQALayoutTests {
             ),
             encoding: .utf8
         )
-        let candidateOpenCommands = script
-            .split(whereSeparator: \.isNewline)
-            .map {
-                String($0).trimmingCharacters(in: .whitespaces)
-            }
-            .filter { $0.hasPrefix("open ") }
-        let installedOpenCommands = installedScript
-            .split(whereSeparator: \.isNewline)
-            .map {
-                String($0).trimmingCharacters(in: .whitespaces)
-            }
-            .filter { $0.hasPrefix("open ") }
+        func openCommands(in source: String) -> [String] {
+            source
+                .split(whereSeparator: \.isNewline)
+                .map {
+                    String($0).trimmingCharacters(in: .whitespaces)
+                }
+                .filter {
+                    $0.hasPrefix("open ") ||
+                        $0.hasPrefix("/usr/bin/open ") ||
+                        $0.hasPrefix("command open ")
+                }
+        }
+        let candidateOpenCommands = openCommands(in: script)
+        let installedOpenCommands = openCommands(in: installedScript)
 
         #expect(script.contains("--scenario-sequence=${scenario_sequence}"))
         #expect(script.contains("--visual-qa-session-id=${CAPTURE_SESSION_ID}"))
@@ -281,9 +283,8 @@ struct ReleaseVisualQALayoutTests {
         #expect(
             installedOpenCommands == [
                 "open -n -W \\",
-                "open \"${PNG}\"",
             ],
-            "Installed QA must launch the app once and open one evidence image."
+            "Installed QA must launch the app exactly once."
         )
         #expect(
             !installedScript.contains(
@@ -296,6 +297,10 @@ struct ReleaseVisualQALayoutTests {
                 "Never call `open` again while the installed QA session is alive."
             )
         )
+        for source in [script, installedScript] {
+            #expect(!source.contains("to activate"))
+            #expect(!source.contains("activate application"))
+        }
         #expect(
             script.contains(
                 "run_capture_session \"${SCENARIO_SEQUENCE}\""

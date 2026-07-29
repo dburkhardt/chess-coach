@@ -76,7 +76,20 @@ struct ChessCoachApp: App {
         }
     }
 
+    @SceneBuilder
     var body: some Scene {
+        if launchMode == .testHost {
+            // Unit tests use the app executable as their host, but must never
+            // construct or focus the production WindowGroup.
+            Settings {
+                EmptyView()
+            }
+        } else {
+            appWindowScene
+        }
+    }
+
+    private var appWindowScene: some Scene {
         let _ = visualQAConfiguration.map { _ in
             ReleaseVisualQARunner.noteSceneConstruction()
         }

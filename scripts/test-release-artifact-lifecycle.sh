@@ -3,15 +3,37 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/release-artifact-lib.sh"
+source "${SCRIPT_DIR}/release-gui-session-lib.sh"
 
 fail() {
   print -u2 "release-artifact lifecycle test failed: $*"
   exit 1
 }
 
+release_open_command_count() {
+  print -r -- "$1" |
+    grep -Ec \
+      '^[[:space:]]*((/usr/bin/|command[[:space:]]+)?)open[[:space:]]' ||
+    true
+}
+
 TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/chess-coach-release-artifact-test.XXXXXX")
 trap 'rm -rf "${TMP_ROOT}"' EXIT
 RECEIPT="${TMP_ROOT}/receipt.tsv"
+
+CHESS_COACH_GUI_LOCK_ROOT="${TMP_ROOT}/gui-locks"
+release_gui_session_lock_acquire foreground ||
+  fail "could not acquire the foreground GUI session lock"
+if CHESS_COACH_GUI_LOCK_ROOT="${CHESS_COACH_GUI_LOCK_ROOT}" \
+  zsh -c \
+    'source "$1"; release_gui_session_lock_acquire foreground' \
+    _ "${SCRIPT_DIR}/release-gui-session-lib.sh" 2>/dev/null; then
+  fail "a concurrent foreground GUI session acquired the same lock"
+fi
+release_gui_session_lock_release
+release_gui_session_lock_acquire foreground ||
+  fail "released foreground GUI session lock could not be reacquired"
+release_gui_session_lock_release
 
 PREPARED_ARCHIVE="${TMP_ROOT}/preparing/ChessCoach.xcarchive"
 CANDIDATE_DIR="${TMP_ROOT}/candidates/commit/executable"
@@ -127,13 +149,16 @@ OPEN_APPROVED_SOURCE=$(<"${SCRIPT_DIR}/open-approved-app.sh")
   fail "approved launcher accepts a variable app target"
 
 PREVIEW_SOURCE=$(<"${SCRIPT_DIR}/open-candidate-preview.sh")
+PREVIEW_OPEN_COUNT=$(release_open_command_count "${PREVIEW_SOURCE}")
 [[ "${PREVIEW_SOURCE}" == *"--candidate-preview"* ]] ||
   fail "candidate preview does not pass its mandatory runtime mode"
 [[ "${PREVIEW_SOURCE}" == *"--candidate-stage="* ]] ||
   fail "candidate preview does not pass the receipt stage to the runtime"
 [[ "${PREVIEW_SOURCE}" == *"UNAPPROVED QA CANDIDATE"* ]] ||
   fail "candidate preview is not explicitly labeled"
-[[ "${PREVIEW_SOURCE}" == *'open -F -n "${APP_PATH}"'* ]] ||
+[[ "${PREVIEW_OPEN_COUNT}" == "1" &&
+    "${PREVIEW_SOURCE}" == *'release_gui_session_lock_acquire foreground'* &&
+    "${PREVIEW_SOURCE}" == *'open -F -n -W "${APP_PATH}"'* ]] ||
   fail "candidate preview does not isolate AppKit scene restoration"
 
 APPROVAL_SOURCE=$(<"${SCRIPT_DIR}/approve-release-visual-qa.sh")
@@ -141,24 +166,35 @@ APPROVAL_SOURCE=$(<"${SCRIPT_DIR}/approve-release-visual-qa.sh")
     "${APPROVAL_SOURCE}" == *"candidate-approved"* &&
     "${APPROVAL_SOURCE}" == *"candidateApprovalSHA256"* ]] ||
   fail "candidate visual approval is not wired into the receipt lifecycle"
+[[ "$(release_open_command_count "${APPROVAL_SOURCE}")" == "0" ]] ||
+  fail "candidate approval unexpectedly opens another app"
 
 CANDIDATE_CAPTURE_SOURCE=$(<"${SCRIPT_DIR}/capture-release-visual-qa.sh")
-CANDIDATE_OPEN_COUNT=$(print -r -- "${CANDIDATE_CAPTURE_SOURCE}" |
-  grep -Ec '^[[:space:]]*open[[:space:]]' || true)
+CANDIDATE_OPEN_COUNT=$(release_open_command_count "${CANDIDATE_CAPTURE_SOURCE}")
 [[ "${CANDIDATE_OPEN_COUNT}" == "1" &&
+    "${CANDIDATE_CAPTURE_SOURCE}" ==
+      *'release_gui_session_lock_acquire foreground'* &&
     "${CANDIDATE_CAPTURE_SOURCE}" != *'open "${APP_PATH}"'* &&
     "${CANDIDATE_CAPTURE_SOURCE}" ==
       *'Never call `open` again while this session is alive.'* ]] ||
   fail "candidate visual QA can reopen or repeatedly refocus the app"
 
 INSTALLED_CAPTURE_SOURCE=$(<"${SCRIPT_DIR}/approve-installed-release-visual-qa.sh")
-INSTALLED_OPEN_COUNT=$(print -r -- "${INSTALLED_CAPTURE_SOURCE}" |
-  grep -Ec '^[[:space:]]*open[[:space:]]' || true)
-[[ "${INSTALLED_OPEN_COUNT}" == "2" &&
+INSTALLED_OPEN_COUNT=$(release_open_command_count "${INSTALLED_CAPTURE_SOURCE}")
+[[ "${INSTALLED_OPEN_COUNT}" == "1" &&
+    "${INSTALLED_CAPTURE_SOURCE}" ==
+      *'release_gui_session_lock_acquire foreground'* &&
     "${INSTALLED_CAPTURE_SOURCE}" != *'open "${APP_PATH}"'* &&
     "${INSTALLED_CAPTURE_SOURCE}" ==
       *'Never call `open` again while the installed QA session is alive.'* ]] ||
   fail "installed visual QA can reopen or repeatedly refocus the app"
+for qa_source in \
+  "${CANDIDATE_CAPTURE_SOURCE}" \
+  "${INSTALLED_CAPTURE_SOURCE}"; do
+  [[ "${qa_source}" != *"to activate"* &&
+      "${qa_source}" != *"activate application"* ]] ||
+    fail "visual QA contains an application activation command"
+done
 
 RELEASE_SOURCE=$(<"${SCRIPT_DIR}/release.sh")
 for required_stage in \

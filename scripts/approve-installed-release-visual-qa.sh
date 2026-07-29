@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/visual-qa-lib.sh"
+source "${SCRIPT_DIR}/release-gui-session-lib.sh"
 
 APP_PATH=""
 EVIDENCE_DIR=""
@@ -21,8 +22,9 @@ using the user's standard window and layout preferences. The app uses an
 in-memory game and an isolated credential store so release QA cannot modify
 saved games or read a credential.
 
-The command validates the pixels, opens the image, and requires a separate
-typed approval before release publication can complete.
+The command validates the pixels, prints the image path, and requires a
+separate typed approval before release publication can complete. It never
+opens another app or steals focus.
 EOF
 }
 
@@ -108,6 +110,7 @@ cleanup() {
     [[ -z "$(pgrep -f "${APP_PID_PATTERN}" || true)" ]] ||
       cleanup_exit_code=1
   fi
+  release_gui_session_lock_release
   rm -rf "${TEMP_DIR}"
   trap - EXIT
   if (( original_exit_code != 0 )); then
@@ -116,6 +119,8 @@ cleanup() {
   exit "${cleanup_exit_code}"
 }
 trap 'cleanup $?' EXIT
+release_gui_session_lock_acquire foreground ||
+  visual_qa_die "Another Chess Coach foreground QA/preview session is active."
 
 # Do not use `open -F`: the post-install gate deliberately allows AppKit to
 # restore the real user's saved window/layout state. The in-app mode isolates
@@ -208,10 +213,10 @@ PNG="${INSTALLED_EVIDENCE}/${SCENARIO}.png"
 INSTALLED_MANIFEST="${INSTALLED_EVIDENCE}/manifest.tsv"
 INSTALLED_MANIFEST_SHA=$(visual_qa_sha256 "${INSTALLED_MANIFEST}")
 
-open "${PNG}"
 print
 print "Inspect the exact installed app screenshot:"
 print "  ${PNG}"
+print "Open it manually or render it in Codex before approving."
 print
 print "Confirm the navigation column, game surface, move list, Coach inspector,"
 print "Hint button, and composer are visible, contained, and not clipped."

@@ -14,8 +14,9 @@ usage() {
 Usage: ./scripts/approve-release-visual-qa.sh --app /path/to/ChessCoach.app
        [--evidence /path/to/evidence] [--approver "Name"]
 
-Opens the exact release candidate's whole-window contact sheet and requires a
-typed approval tied to the current Git commit and manifest SHA-256.
+Prints the exact release candidate's whole-window contact-sheet path and
+requires a typed approval tied to the current Git commit and manifest SHA-256.
+It never opens another app or steals focus.
 EOF
 }
 
@@ -70,10 +71,10 @@ COMMIT=$(git -C "${VISUAL_QA_REPO_DIR}" rev-parse HEAD)
 SHORT_COMMIT=${COMMIT[1,12]}
 MANIFEST_SHA=$(visual_qa_sha256 "${MANIFEST}")
 
-open "${CONTACT_SHEET}"
 print
 print "Inspect every labeled whole-window capture in:"
 print "  ${CONTACT_SHEET}"
+print "Open it manually or render it in Codex before approving."
 print
 
 if [[ -z "${APPROVER}" ]]; then
