@@ -1439,7 +1439,7 @@ struct GameCoordinatorTests {
         let selectedClock = try #require(
             game.sortedPlies.first?.clockAfter
         )
-        await clock.advance(by: 3_000)
+        clock.elapseWithoutTick(by: 3_000)
         harness.coordinator.resign()
         let completedClock = harness.coordinator.clocks
         #expect(completedClock != selectedClock)
