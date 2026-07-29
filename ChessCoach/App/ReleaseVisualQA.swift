@@ -475,6 +475,15 @@ enum ReleaseVisualQARunner {
                 ? .darkAqua
                 : .aqua
         )
+        // LaunchServices may start an automated candidate on the Space that
+        // last contained this bundle identifier while leaving another app
+        // frontmost. Put the exact shipping window on the user's active Space
+        // before asking AppKit to activate it. The capture still refuses to
+        // proceed until this real window is both active and key.
+        var collectionBehavior = window.collectionBehavior
+        collectionBehavior.remove(.canJoinAllSpaces)
+        collectionBehavior.insert(.moveToActiveSpace)
+        window.collectionBehavior = collectionBehavior
         window.orderFrontRegardless()
         _ = NSRunningApplication.current.activate(
             options: [.activateAllWindows]
