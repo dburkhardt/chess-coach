@@ -12,6 +12,11 @@
   sole non-preview exception is the source-bound
   `./scripts/release.sh prepare` or `capture` visual-QA harness, which launches
   the candidate with `--visual-qa`, captures the required evidence, and exits.
+- Before any foreground candidate or installed-app QA, tell the user that
+  exactly one Chess Coach window will open and wait for explicit approval.
+  Launch that session once. Never poll with `open`, repeatedly activate the
+  application, or create additional WindowGroup scenes; if macOS does not
+  foreground the window, wait passively for one user click.
 - Never describe a candidate as ready, accepted, installed, published, or
   released unless its source-bound receipt has reached the corresponding
   stage.

@@ -56,6 +56,7 @@ struct AppNavigationSidebar: View {
         .accessibilityIdentifier(
             "app-navigation-\(section.rawValue)"
         )
+        .releaseVisualQAProbe("navigation-\(section.rawValue)")
     }
 }
 
@@ -63,6 +64,65 @@ enum AppNavigationSidebarMetrics {
     static let minimumWidth: CGFloat = 190
     static let idealWidth: CGFloat = 220
     static let maximumWidth: CGFloat = 260
+
+    static func widths(
+        visualQAOverride: Double
+    ) -> AppColumnWidthRange {
+        AppColumnWidthRange.resolving(
+            visualQAOverride: visualQAOverride,
+            minimum: minimumWidth,
+            ideal: idealWidth,
+            maximum: maximumWidth
+        )
+    }
+}
+
+enum CoachInspectorMetrics {
+    static let minimumWidth: CGFloat = 300
+    static let idealWidth: CGFloat = 360
+    static let maximumWidth: CGFloat = 460
+    static let accessibilityIdentifier = "coach-inspector-column"
+
+    static func widths(
+        visualQAOverride: Double
+    ) -> AppColumnWidthRange {
+        AppColumnWidthRange.resolving(
+            visualQAOverride: visualQAOverride,
+            minimum: minimumWidth,
+            ideal: idealWidth,
+            maximum: maximumWidth
+        )
+    }
+}
+
+struct AppColumnWidthRange: Equatable {
+    let minimum: CGFloat
+    let ideal: CGFloat
+    let maximum: CGFloat
+
+    static func resolving(
+        visualQAOverride: Double,
+        minimum: CGFloat,
+        ideal: CGFloat,
+        maximum: CGFloat
+    ) -> Self {
+        let requested = CGFloat(visualQAOverride)
+        guard requested.isFinite,
+              requested >= minimum,
+              requested <= maximum
+        else {
+            return Self(
+                minimum: minimum,
+                ideal: ideal,
+                maximum: maximum
+            )
+        }
+        return Self(
+            minimum: requested,
+            ideal: requested,
+            maximum: requested
+        )
+    }
 }
 
 enum AppNavigationSidebarSections {

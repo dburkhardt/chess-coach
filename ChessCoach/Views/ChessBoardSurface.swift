@@ -123,6 +123,7 @@ struct ChessBoardSurface: View {
             .accessibilityLabel("Chess board, \(snapshot.perspective.displayName) perspective")
         }
         .aspectRatio(1, contentMode: .fit)
+        .releaseVisualQAProbe(ReleaseVisualQALayoutValidator.board)
         .onAppear {
             if interaction.focusedSquare == nil {
                 interaction.focusedSquare = snapshot.perspective == .white ? "a1" : "h8"

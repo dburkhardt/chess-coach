@@ -142,6 +142,24 @@ APPROVAL_SOURCE=$(<"${SCRIPT_DIR}/approve-release-visual-qa.sh")
     "${APPROVAL_SOURCE}" == *"candidateApprovalSHA256"* ]] ||
   fail "candidate visual approval is not wired into the receipt lifecycle"
 
+CANDIDATE_CAPTURE_SOURCE=$(<"${SCRIPT_DIR}/capture-release-visual-qa.sh")
+CANDIDATE_OPEN_COUNT=$(print -r -- "${CANDIDATE_CAPTURE_SOURCE}" |
+  grep -Ec '^[[:space:]]*open[[:space:]]' || true)
+[[ "${CANDIDATE_OPEN_COUNT}" == "1" &&
+    "${CANDIDATE_CAPTURE_SOURCE}" != *'open "${APP_PATH}"'* &&
+    "${CANDIDATE_CAPTURE_SOURCE}" ==
+      *'Never call `open` again while this session is alive.'* ]] ||
+  fail "candidate visual QA can reopen or repeatedly refocus the app"
+
+INSTALLED_CAPTURE_SOURCE=$(<"${SCRIPT_DIR}/approve-installed-release-visual-qa.sh")
+INSTALLED_OPEN_COUNT=$(print -r -- "${INSTALLED_CAPTURE_SOURCE}" |
+  grep -Ec '^[[:space:]]*open[[:space:]]' || true)
+[[ "${INSTALLED_OPEN_COUNT}" == "2" &&
+    "${INSTALLED_CAPTURE_SOURCE}" != *'open "${APP_PATH}"'* &&
+    "${INSTALLED_CAPTURE_SOURCE}" ==
+      *'Never call `open` again while the installed QA session is alive.'* ]] ||
+  fail "installed visual QA can reopen or repeatedly refocus the app"
+
 RELEASE_SOURCE=$(<"${SCRIPT_DIR}/release.sh")
 for required_stage in \
   capture-failed \

@@ -259,6 +259,9 @@ struct CoachProviderSetupFooter: View {
             CoachProviderSetupFooterContent.accessibilityLabel
         )
         .accessibilityIdentifier("coach-provider-setup")
+        .releaseVisualQAProbe(
+            ReleaseVisualQALayoutValidator.providerFooter
+        )
     }
 
     private var horizontalContent: some View {
@@ -288,6 +291,9 @@ struct CoachProviderSetupFooter: View {
         }
         .buttonStyle(.link)
         .accessibilityIdentifier("configure-inference")
+        .releaseVisualQAProbe(
+            ReleaseVisualQALayoutValidator.configureInference
+        )
     }
 }
 

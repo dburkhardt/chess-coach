@@ -773,6 +773,9 @@ private struct MoveHistoryView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Move history")
+        .releaseVisualQAProbe(
+            ReleaseVisualQALayoutValidator.moveHistory
+        )
     }
 
     private func showPreviousPosition() {
