@@ -468,8 +468,7 @@ if [[ "${MODE}" == "prepare" ]]; then
   CANDIDATE_DIR=$(release_artifact_candidate_dir "${COMMIT}" "${EXECUTABLE_SHA}")
   [[ ! -e "${CANDIDATE_DIR}" ]] ||
     { print -u2 "Candidate already exists and will not be overwritten: ${CANDIDATE_DIR}"; exit 1; }
-  mkdir -p "${CANDIDATE_DIR:h}"
-  mv "${ARCHIVE_PATH}" "${CANDIDATE_DIR}/ChessCoach.xcarchive"
+  release_artifact_place_archive "${ARCHIVE_PATH}" "${CANDIDATE_DIR}"
   ARCHIVE_PATH="${CANDIDATE_DIR}/ChessCoach.xcarchive"
   APP_PATH="${ARCHIVE_PATH}/Products/Applications/ChessCoach.app"
   ENGINE_PATH="${APP_PATH}/Contents/Resources/Engines/stockfish"

@@ -13,6 +13,21 @@ TMP_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/chess-coach-release-artifact-test.XXXXXX")
 trap 'rm -rf "${TMP_ROOT}"' EXIT
 RECEIPT="${TMP_ROOT}/receipt.tsv"
 
+PREPARED_ARCHIVE="${TMP_ROOT}/preparing/ChessCoach.xcarchive"
+CANDIDATE_DIR="${TMP_ROOT}/candidates/commit/executable"
+mkdir -p "${PREPARED_ARCHIVE}/Products/Applications"
+print "signed candidate" >"${PREPARED_ARCHIVE}/Products/Applications/fixture"
+release_artifact_place_archive "${PREPARED_ARCHIVE}" "${CANDIDATE_DIR}"
+[[ -f "${CANDIDATE_DIR}/ChessCoach.xcarchive/Products/Applications/fixture" ]] ||
+  fail "prepared archive was not placed inside the executable-hash directory"
+[[ ! -e "${PREPARED_ARCHIVE}" ]] ||
+  fail "prepared archive source remained after placement"
+if release_artifact_place_archive \
+  "${CANDIDATE_DIR}/ChessCoach.xcarchive" \
+  "${CANDIDATE_DIR}" 2>/dev/null; then
+  fail "candidate placement overwrote an existing candidate directory"
+fi
+
 {
   print -r -- $'format\trelease-artifact-receipt-v1'
   print -r -- $'stage\tbuilt'
