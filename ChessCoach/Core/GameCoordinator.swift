@@ -639,6 +639,11 @@ final class GameCoordinator {
 
     func resign() {
         guard status.result == .inProgress else { return }
+        // Capture any thinking time since the most recent timer callback before
+        // freezing the final clock snapshot. This also keeps resignation
+        // deterministic when the clock task has not yet reached its first tick.
+        tickClock()
+        guard status.result == .inProgress else { return }
         finish(
             result: playerSide == .white ? .blackWon : .whiteWon,
             reason: .resignation,
