@@ -1,7 +1,9 @@
 fresh-default-dark
 fresh-compact-dark
 fresh-default-light
+sidebar-collapsed-default-dark
 lesson-default-dark
+lesson-clocked-default-dark
 completed-default-dark
 missing-inference-key-default-light
 inference-settings-default-light

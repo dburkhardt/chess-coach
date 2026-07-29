@@ -3,29 +3,49 @@ import SwiftUI
 struct RootView: View {
     @Bindable var model: AppModel
     @State private var showingThirdPartyNotices = false
+    @SceneStorage(ChessCoachWindowLayout.sidebarVisibilitySceneKey)
+    private var navigationSidebarVisibilityRaw =
+        AppNavigationSidebarVisibility.expanded.rawValue
+    @AppStorage(ChessCoachWindowLayout.sidebarVisibilityLaunchOverrideKey)
+    private var navigationSidebarVisibilityLaunchOverride = ""
     @AppStorage("coach.inspector.isPresented")
     private var isCoachInspectorPresented = true
 
     var body: some View {
-        HStack(spacing: 0) {
+        NavigationSplitView(
+            columnVisibility: navigationColumnVisibility
+        ) {
             AppNavigationSidebar(selection: $model.selection)
-                .frame(width: AppNavigationSidebarMetrics.idealWidth)
-                .background(.bar)
+                .navigationSplitViewColumnWidth(
+                    min: AppNavigationSidebarMetrics.minimumWidth,
+                    ideal: AppNavigationSidebarMetrics.idealWidth,
+                    max: AppNavigationSidebarMetrics.maximumWidth
+                )
                 .accessibilityIdentifier("app-navigation-column")
-
-            Divider()
-
+        } detail: {
             NavigationStack {
                 content
                     .frame(minWidth: 620)
             }
+            .background {
+                Color(nsColor: .windowBackgroundColor)
+                    .backgroundExtensionEffect()
+            }
+        }
+        .navigationSplitViewStyle(.balanced)
+        .onAppear {
+            applyNavigationSidebarLaunchOverride()
         }
         .inspector(isPresented: $isCoachInspectorPresented) {
             CoachInspectorContainer(
                 coordinator: model.coordinator,
                 inferenceSettings: model.inferenceSettings,
                 isGameContextVisible: model.selection == .currentGame,
-                onConfigureInference: model.openInferenceSettings
+                onConfigureInference: { issue in
+                    model.openInferenceSettings(
+                        focusTarget: issue.settingsFocusTarget
+                    )
+                }
             )
             .inspectorColumnWidth(min: 300, ideal: 360, max: 460)
         }
@@ -78,6 +98,31 @@ struct RootView: View {
         .sheet(isPresented: $showingThirdPartyNotices) {
             ThirdPartyNoticesView()
         }
+    }
+
+    private var navigationColumnVisibility:
+        Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: {
+                AppNavigationSidebarVisibility(
+                    rawValue: navigationSidebarVisibilityRaw
+                )?.splitViewVisibility ?? .all
+            },
+            set: { visibility in
+                navigationSidebarVisibilityRaw =
+                    AppNavigationSidebarVisibility(visibility).rawValue
+            }
+        )
+    }
+
+    private func applyNavigationSidebarLaunchOverride() {
+        guard let visibility = AppNavigationSidebarVisibility(
+            rawValue: navigationSidebarVisibilityLaunchOverride
+        ) else {
+            return
+        }
+        navigationSidebarVisibilityRaw = visibility.rawValue
+        navigationSidebarVisibilityLaunchOverride = ""
     }
 
     @ViewBuilder

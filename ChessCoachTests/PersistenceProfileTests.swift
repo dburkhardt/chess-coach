@@ -14,15 +14,32 @@ struct PersistenceProfileTests {
         let firstRequest = model.settingsNavigationRequest
         #expect(model.selection == .settings)
         #expect(firstRequest?.destination == .inference)
+        #expect(firstRequest?.focusTarget == .inferenceKey)
         #expect(model.coordinator.activeGame?.id == gameBeforeNavigation)
         #expect(model.coordinator.state.fen == fenBeforeNavigation)
 
-        model.openInferenceSettings()
+        model.openInferenceSettings(focusTarget: .modelID)
         let secondRequest = model.settingsNavigationRequest
         #expect(secondRequest?.destination == .inference)
+        #expect(secondRequest?.focusTarget == .modelID)
         #expect(secondRequest?.id != firstRequest?.id)
         #expect(model.coordinator.activeGame?.id == gameBeforeNavigation)
         #expect(model.coordinator.state.fen == fenBeforeNavigation)
+    }
+
+    @Test func inferenceConfigurationIssuesRouteToTheirExactFields() {
+        #expect(
+            InferenceConfigurationIssue.missingKey.settingsFocusTarget
+                == .inferenceKey
+        )
+        #expect(
+            InferenceConfigurationIssue.missingEndpoint.settingsFocusTarget
+                == .endpoint
+        )
+        #expect(
+            InferenceConfigurationIssue.missingModel.settingsFocusTarget
+                == .modelID
+        )
     }
 
     @Test func experienceAnchorsApplyBeforeCalibrationButNotAfter() {
@@ -280,10 +297,10 @@ struct PersistenceProfileTests {
         )
 
         #expect(project.contains("MARKETING_VERSION: \"0.1.0\""))
-        #expect(project.contains("CURRENT_PROJECT_VERSION: \"8\""))
+        #expect(project.contains("CURRENT_PROJECT_VERSION: \"9\""))
         #expect(!project.contains("DEVELOPMENT_TEAM:"))
         #expect(release.contains("Chess-Coach-${VERSION}-${PRERELEASE}.dmg"))
-        #expect(release.contains("PRERELEASE=\"beta.8\""))
+        #expect(release.contains("PRERELEASE=\"beta.9\""))
         #expect(release.contains("DEVELOPER_ID_APPLICATION:?"))
         #expect(release.contains("DEVELOPMENT_TEAM:?"))
         #expect(release.contains("NOTARYTOOL_PROFILE:?"))
@@ -342,6 +359,10 @@ struct PersistenceProfileTests {
         #expect(quitLibrary.contains("APP_QUIT_RETRY_SECONDS=(5 15)"))
         #expect(quitLibrary.contains("request_graceful_app_quit"))
         #expect(quitLibrary.contains("describe_running_app_processes"))
+        #expect(runtimeGate.contains("verify_runtime_responsiveness"))
+        #expect(runtimeGate.contains("cpu-and-rss-stable"))
+        #expect(runtimeGate.contains("value > 80.0"))
+        #expect(runtimeGate.contains("rss - initial_rss <= 102400"))
         #expect(!combinedSource.contains("kill -9"))
         #expect(!combinedSource.contains("killall"))
         #expect(!combinedSource.contains("pkill"))

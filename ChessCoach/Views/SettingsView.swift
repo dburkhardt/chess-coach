@@ -3,12 +3,27 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var appModel
 
+    @AppStorage(ChessBoardPreferences.moveMethodKey)
+    private var moveMethod =
+        ChessBoardPreferences.MoveMethod.clickAndDrag.rawValue
+    @AppStorage(ChessBoardPreferences.showLegalMarkersKey)
+    private var showLegalMarkers = true
+    @AppStorage(ChessBoardPreferences.showCoordinatesKey)
+    private var showCoordinates = true
+    @AppStorage(ChessBoardPreferences.animationsEnabledKey)
+    private var animationsEnabled = true
+    @AppStorage(ChessBoardPreferences.pieceStyleKey)
+    private var pieceStyle = ChessBoardPreferences.PieceStyle.merida.rawValue
+    @AppStorage("coaching.defaultBlunderGuard")
+    private var defaultBlunderGuard = false
+
     @State private var inferenceKey = ""
     @State private var discoveredModels: [String] = []
     @State private var status: InferenceTestStatus = .idle
     @State private var isWorking = false
     @State private var showsThirdPartyNotices = false
     @State private var handledNavigationRequestID: UUID?
+    @State private var navigationTask: Task<Void, Never>?
     @FocusState private var focusedField: FocusedField?
 
     private var settings: InferenceSettings { appModel.inferenceSettings }
@@ -16,12 +31,57 @@ struct SettingsView: View {
 
     private enum FocusedField: Hashable {
         case inferenceKey
+        case endpoint
+        case modelID
+    }
+
+    private enum SettingsField: Hashable {
+        case inferenceKey
+        case endpoint
+        case modelID
     }
 
     var body: some View {
         @Bindable var settings = settings
         ScrollViewReader { proxy in
             Form {
+                Section("Board") {
+                    Picker("Move method", selection: $moveMethod) {
+                        Text("Click and drag")
+                            .tag(
+                                ChessBoardPreferences.MoveMethod
+                                    .clickAndDrag.rawValue
+                            )
+                        Text("Click only")
+                            .tag(
+                                ChessBoardPreferences.MoveMethod
+                                    .clickOnly.rawValue
+                            )
+                        Text("Drag only")
+                            .tag(
+                                ChessBoardPreferences.MoveMethod
+                                    .dragOnly.rawValue
+                            )
+                    }
+
+                    Toggle("Legal move markers", isOn: $showLegalMarkers)
+                    Toggle("Coordinates", isOn: $showCoordinates)
+                    Toggle("Animations", isOn: $animationsEnabled)
+
+                    Picker("Piece style", selection: $pieceStyle) {
+                        Text("Sashité Merida")
+                            .tag(
+                                ChessBoardPreferences.PieceStyle
+                                    .merida.rawValue
+                            )
+                        Text("Chessnut")
+                            .tag(
+                                ChessBoardPreferences.PieceStyle
+                                    .chessnut.rawValue
+                            )
+                    }
+                }
+
                 Section("Inference provider") {
                     Picker("Provider", selection: $settings.provider) {
                         ForEach(InferenceProviderKind.allCases) { provider in
@@ -41,6 +101,9 @@ struct SettingsView: View {
                             "Endpoint URL",
                             text: $settings.customEndpoint
                         )
+                        .id(SettingsField.endpoint)
+                        .focused($focusedField, equals: .endpoint)
+                        .accessibilityIdentifier("inference-endpoint-field")
                         .onSubmit {
                             appModel.coordinator
                                 .refreshPreparedCoachingForCurrentPosition()
@@ -53,13 +116,10 @@ struct SettingsView: View {
                     }
 
                     SecureField(
-                        settings.hasStoredKey
-                            ? "New inference key (a key is already stored)"
-                            : (settings.provider.requiresCredential
-                                ? "Inference key"
-                                : "Inference key (optional)"),
+                        "Inference key",
                         text: $inferenceKey
                     )
+                    .id(SettingsField.inferenceKey)
                     .textContentType(.password)
                     .focused($focusedField, equals: .inferenceKey)
                     .accessibilityIdentifier("inference-key-field")
@@ -116,7 +176,28 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     }
 
+                    if !settings.provider.requiresCredential {
+                        Text(
+                            "The inference key is optional for custom endpoints "
+                                + "that do not require authentication."
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
+                    if let storeError = settings.credentialStoreError {
+                        Label(
+                            storeError,
+                            systemImage: "exclamationmark.triangle"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    }
+
                     TextField("Model ID", text: $settings.modelID)
+                        .id(SettingsField.modelID)
+                        .focused($focusedField, equals: .modelID)
+                        .accessibilityIdentifier("inference-model-field")
                         .onSubmit {
                             appModel.coordinator
                                 .refreshPreparedCoachingForCurrentPosition()
@@ -204,6 +285,10 @@ struct SettingsView: View {
                 .id(SettingsDestination.inference)
 
                 Section("Coaching") {
+                    Toggle(
+                        "Blunder Guard for new games",
+                        isOn: $defaultBlunderGuard
+                    )
                     LabeledContent(
                         "Hint behavior",
                         value: "Concept first, move on reveal"
@@ -250,6 +335,11 @@ struct SettingsView: View {
             }
             .onChange(of: appModel.settingsNavigationRequest?.id) {
                 handleNavigationRequest(using: proxy)
+            }
+            .onDisappear {
+                navigationTask?.cancel()
+                navigationTask = nil
+                focusedField = nil
             }
         }
         .navigationTitle("Settings")
@@ -315,10 +405,42 @@ struct SettingsView: View {
             return
         }
         handledNavigationRequestID = request.id
-        Task { @MainActor in
+        navigationTask?.cancel()
+        let focusTarget = request.focusTarget
+        navigationTask = Task { @MainActor in
             await Task.yield()
-            proxy.scrollTo(SettingsDestination.inference, anchor: .top)
-            focusedField = .inferenceKey
+            guard !Task.isCancelled else { return }
+            proxy.scrollTo(settingsField(for: focusTarget), anchor: .center)
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            focusedField = focusField(for: focusTarget)
+            navigationTask = nil
+        }
+    }
+
+    private func settingsField(
+        for target: SettingsFocusTarget
+    ) -> SettingsField {
+        switch target {
+        case .inferenceKey:
+            .inferenceKey
+        case .endpoint:
+            .endpoint
+        case .modelID:
+            .modelID
+        }
+    }
+
+    private func focusField(
+        for target: SettingsFocusTarget
+    ) -> FocusedField {
+        switch target {
+        case .inferenceKey:
+            .inferenceKey
+        case .endpoint:
+            .endpoint
+        case .modelID:
+            .modelID
         }
     }
 

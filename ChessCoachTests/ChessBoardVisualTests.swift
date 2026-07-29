@@ -202,19 +202,16 @@ struct ChessBoardVisualTests {
         )
     }
 
-    @Test func missingInferenceConfigurationNoticeRenders() throws {
-        #expect(
-            InferenceConfigurationIssue.missingKey.message
-                == "No inference key configured."
-        )
-
-        let content = InferenceConfigurationNotice(
-            issue: .missingKey,
-            onConfigure: {}
-        )
-        .padding(16)
+    @Test func missingProviderFooterRenders() throws {
+        let content = VStack(spacing: 0) {
+            Divider()
+            CoachProviderSetupFooter(
+                issue: .missingKey,
+                onConfigure: { _ in }
+            )
+        }
         .frame(width: 320, height: 70, alignment: .leading)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(.bar)
         .environment(\.colorScheme, .light)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2

@@ -39,4 +39,44 @@ struct AppNavigationSidebarTests {
         )
         #expect(defaults.object(forKey: splitFrameKey) == nil)
     }
+
+    @Test func sidebarUsesNativeWidthRangeAndPinsSettingsSeparately() {
+        #expect(AppNavigationSidebarMetrics.minimumWidth == 190)
+        #expect(AppNavigationSidebarMetrics.idealWidth == 220)
+        #expect(AppNavigationSidebarMetrics.maximumWidth == 260)
+        #expect(
+            AppNavigationSidebarSections.primary == [
+                .newGame,
+                .currentGame,
+                .games,
+                .progress,
+            ]
+        )
+        #expect(!AppNavigationSidebarSections.primary.contains(.settings))
+    }
+
+    @Test func sidebarVisibilityUsesStableRestorableValues() {
+        #expect(
+            AppNavigationSidebarVisibility.expanded.splitViewVisibility
+                == .all
+        )
+        #expect(
+            AppNavigationSidebarVisibility.collapsed.splitViewVisibility
+                == .detailOnly
+        )
+        #expect(
+            AppNavigationSidebarVisibility(.all) == .expanded
+        )
+        #expect(
+            AppNavigationSidebarVisibility(.detailOnly) == .collapsed
+        )
+        #expect(
+            ChessCoachWindowLayout.sidebarVisibilitySceneKey
+                == "layout.navigationSidebar.visibility.v1"
+        )
+        #expect(
+            ChessCoachWindowLayout.sidebarVisibilityLaunchOverrideKey
+                == "layout.navigationSidebar.visibilityLaunchOverride"
+        )
+    }
 }

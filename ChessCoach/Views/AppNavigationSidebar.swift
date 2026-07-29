@@ -1,43 +1,35 @@
 import SwiftUI
 
-/// The app has five fixed destinations, so its primary navigation should not
-/// live in a scroll-backed `List`. A sidebar list can retain a horizontal
-/// clip-view offset after window restoration, hiding its leading content.
 struct AppNavigationSidebar: View {
     @Binding var selection: AppSection
 
     var body: some View {
-        VStack(spacing: 2) {
-            ForEach(AppSection.allCases) { section in
-                Button {
-                    selection = section
-                } label: {
+        VStack(spacing: 0) {
+            List(selection: $selection) {
+                ForEach(AppNavigationSidebarSections.primary) { section in
                     Label(section.title, systemImage: section.systemImage)
                         .lineLimit(1)
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: 30,
-                            alignment: .leading
+                        .tag(section)
+                        .accessibilityIdentifier(
+                            "app-navigation-\(section.rawValue)"
                         )
-                        .contentShape(.rect)
                 }
-                .buttonStyle(
-                    AppNavigationRowButtonStyle(
-                        isSelected: selection == section
-                    )
-                )
-                .accessibilityAddTraits(
-                    selection == section ? .isSelected : []
-                )
-                .accessibilityIdentifier(
-                    "app-navigation-\(section.rawValue)"
-                )
             }
+            .listStyle(.sidebar)
 
-            Spacer(minLength: 0)
+            List(selection: $selection) {
+                Label(
+                    AppSection.settings.title,
+                    systemImage: AppSection.settings.systemImage
+                )
+                .lineLimit(1)
+                .tag(AppSection.settings)
+                .accessibilityIdentifier("app-navigation-settings")
+            }
+            .listStyle(.sidebar)
+            .scrollDisabled(true)
+            .frame(height: 46)
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 8)
         .frame(
             maxWidth: .infinity,
             maxHeight: .infinity,
@@ -48,13 +40,48 @@ struct AppNavigationSidebar: View {
 
 enum AppNavigationSidebarMetrics {
     static let minimumWidth: CGFloat = 190
-    static let idealWidth: CGFloat = 210
-    static let maximumWidth: CGFloat = 250
+    static let idealWidth: CGFloat = 220
+    static let maximumWidth: CGFloat = 260
+}
+
+enum AppNavigationSidebarSections {
+    static let primary: [AppSection] = [
+        .newGame,
+        .currentGame,
+        .games,
+        .progress,
+    ]
+}
+
+enum AppNavigationSidebarVisibility: String {
+    case expanded
+    case collapsed
+
+    init(_ visibility: NavigationSplitViewVisibility) {
+        self = visibility == .detailOnly ? .collapsed : .expanded
+    }
+
+    var splitViewVisibility: NavigationSplitViewVisibility {
+        switch self {
+        case .expanded:
+            .all
+        case .collapsed:
+            .detailOnly
+        }
+    }
 }
 
 enum ChessCoachWindowLayout {
+    /// Per-window state restoration. Values are `expanded` or `collapsed`.
+    static let sidebarVisibilitySceneKey =
+        "layout.navigationSidebar.visibility.v1"
+    /// Optional one-launch override used by deterministic release visual QA.
+    /// Values are `expanded` or `collapsed`; the app consumes and clears it.
+    static let sidebarVisibilityLaunchOverrideKey =
+        "layout.navigationSidebar.visibilityLaunchOverride"
+
     private static let splitViewRepairKey =
-        "layout.sidebarNavigationSplitViewRepair.v1"
+        "layout.sidebarNavigationSplitViewRepair.v2"
 
     static func prepareForLaunch(
         defaults: UserDefaults = .standard,
@@ -73,40 +100,5 @@ enum ChessCoachWindowLayout {
             defaults.removeObject(forKey: key)
         }
         defaults.set(true, forKey: splitViewRepairKey)
-    }
-}
-
-private struct AppNavigationRowButtonStyle: ButtonStyle {
-    @Environment(\.controlActiveState) private var controlActiveState
-
-    let isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 10)
-            .foregroundStyle(foregroundStyle)
-            .background {
-                if isSelected {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(selectionBackground)
-                } else if configuration.isPressed {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(.primary.opacity(0.08))
-                }
-            }
-    }
-
-    private var foregroundStyle: Color {
-        guard isSelected else { return .primary }
-        return controlActiveState == .inactive ? .primary : .white
-    }
-
-    private var selectionBackground: Color {
-        if controlActiveState == .inactive {
-            return Color(
-                nsColor: .unemphasizedSelectedContentBackgroundColor
-            )
-        }
-        return .accentColor
     }
 }

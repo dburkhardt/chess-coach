@@ -60,6 +60,8 @@ struct ChessCoachApp: App {
             height: visualQAConfiguration?.scenario.windowSize.height ?? 900
         )
         .commands {
+            SidebarCommands()
+
             CommandGroup(replacing: .newItem) {
                 Button("New Game") {
                     model.selection = .newGame
@@ -77,12 +79,13 @@ struct ChessCoachApp: App {
                 }
                 .keyboardShortcut("k", modifiers: [.command, .option])
             }
-        }
 
-        Settings {
-            SettingsView()
-                .environment(model)
-                .frame(width: 620, height: 540)
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    model.selection = .settings
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 
@@ -92,7 +95,7 @@ struct ChessCoachApp: App {
             .environment(model)
             .modelContainer(model.persistence.container)
             .defaultAppStorage(appDefaults)
-            .frame(minWidth: 1_180, minHeight: 760)
+            .frame(minWidth: 980, minHeight: 760)
 
         if let visualQAConfiguration {
             root

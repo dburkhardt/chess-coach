@@ -1,5 +1,6 @@
 import Foundation
 import LocalAuthentication
+import Observation
 import Security
 import Synchronization
 import Testing
@@ -921,6 +922,7 @@ struct ModelInferenceClientTests {
         #expect(reloaded.modelID == "local-model")
         #expect(reloaded.apiMode == .chatCompletions)
         #expect(reloaded.existingKey() == "custom-placeholder")
+        reloaded.prepareCredential(for: .openAI)
         #expect(reloaded.existingKey(for: .openAI) == "stored-placeholder")
     }
 
@@ -1015,6 +1017,94 @@ struct ModelInferenceClientTests {
                     InferenceProviderKind.customOpenAICompatible.rawValue
             ) == 1
         )
+    }
+
+    @MainActor
+    @Test func credentialBodyReadsArePureAndObservableSnapshotChanges() async throws {
+        let suiteName = "ChessCoachTests.PureCredentialReads.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("test-model", forKey: "ai.modelID")
+        let keychain = MemoryKeychain(
+            values: [
+                InferenceProviderKind.openAI.rawValue:
+                    "stored-placeholder",
+            ]
+        )
+        let settings = InferenceSettings(
+            defaults: defaults,
+            keychain: keychain
+        )
+        let changes = ObservationChangeCounter()
+
+        for _ in 0..<20 {
+            withObservationTracking {
+                _ = settings.credentialState
+                _ = settings.hasStoredKey
+                _ = settings.hasSessionKey
+                _ = settings.credentialPersistenceAvailability
+                _ = settings.credentialStoreError
+                _ = settings.configurationIssue
+                _ = settings.existingKey()
+                _ = settings.keyForRequest(typedKey: "")
+            } onChange: {
+                changes.increment()
+            }
+        }
+
+        await Task.yield()
+        #expect(changes.value == 0)
+        #expect(
+            keychain.readCount(
+                account: InferenceProviderKind.openAI.rawValue
+            ) == 1
+        )
+
+        settings.useKeyForSession("session-placeholder")
+        await Task.yield()
+        #expect(changes.value > 0)
+        #expect(settings.credentialSnapshot.state == .sessionOnly)
+        #expect(settings.credentialSnapshot.hasStoredKey)
+        #expect(settings.credentialSnapshot.hasSessionKey)
+    }
+
+    @MainActor
+    @Test func providerSwitchAndCredentialOperationsRefreshSnapshot() throws {
+        let suiteName = "ChessCoachTests.CredentialSnapshot.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let keychain = MemoryKeychain(
+            values: [
+                InferenceProviderKind.openAI.rawValue:
+                    "openai-placeholder",
+                InferenceProviderKind.customOpenAICompatible.rawValue:
+                    "custom-placeholder",
+            ]
+        )
+        let settings = InferenceSettings(
+            defaults: defaults,
+            keychain: keychain
+        )
+
+        #expect(settings.credentialSnapshot.provider == .openAI)
+        #expect(settings.credentialSnapshot.state == .stored)
+        #expect(settings.credentialSnapshot.hasStoredKey)
+
+        settings.provider = .customOpenAICompatible
+        #expect(settings.credentialSnapshot.provider == .customOpenAICompatible)
+        #expect(settings.credentialSnapshot.state == .stored)
+        #expect(keychain.totalReadCount == 2)
+
+        settings.useKeyForSession("session-placeholder")
+        #expect(settings.credentialSnapshot.state == .sessionOnly)
+        #expect(settings.credentialSnapshot.hasSessionKey)
+
+        settings.clearSessionKey()
+        #expect(settings.credentialSnapshot.state == .stored)
+        try settings.removeKey()
+        #expect(settings.credentialSnapshot.state == .missing)
+        #expect(!settings.credentialSnapshot.hasStoredKey)
+        #expect(!settings.credentialSnapshot.hasSessionKey)
     }
 
     @MainActor
@@ -1316,6 +1406,19 @@ private final class ReplyURLProtocol: URLProtocol, @unchecked Sendable {
             guard count > 0 else { return body }
             body.append(contentsOf: buffer.prefix(count))
         }
+    }
+}
+
+private final class ObservationChangeCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func increment() {
+        lock.withLock { count += 1 }
+    }
+
+    var value: Int {
+        lock.withLock { count }
     }
 }
 

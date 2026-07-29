@@ -160,6 +160,7 @@ final class GameCoordinator {
             isEngineThinking: isEngineThinking,
             hasBlunderWarning: blunderWarning != nil,
             isHistoryPreviewActive: historyPreview != nil,
+            usesClock: configuration.timeControl.usesClock,
             preparationState: coachPreparationState,
             teachingMoment: teachingMoment,
             canTakeBack: canTakeBack,

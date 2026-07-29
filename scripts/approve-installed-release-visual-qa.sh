@@ -66,7 +66,7 @@ visual_qa_assert_clean_source
 EVIDENCE_DIR=${EVIDENCE_DIR:A}
 
 # This proves the mounted/installed app is still the same signed executable
-# whose seven deterministic states were reviewed before packaging.
+# whose required deterministic states were reviewed before packaging.
 "${SCRIPT_DIR}/verify-release-visual-qa.sh" \
   --app "${APP_PATH}" \
   --evidence "${EVIDENCE_DIR}"

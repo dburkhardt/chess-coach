@@ -34,7 +34,10 @@ struct ReleaseVisualQAConfiguration {
         case freshDefaultDark = "fresh-default-dark"
         case freshCompactDark = "fresh-compact-dark"
         case freshDefaultLight = "fresh-default-light"
+        case sidebarCollapsedDefaultDark =
+            "sidebar-collapsed-default-dark"
         case lessonDefaultDark = "lesson-default-dark"
+        case lessonClockedDefaultDark = "lesson-clocked-default-dark"
         case completedDefaultDark = "completed-default-dark"
         case missingInferenceKeyDefaultLight =
             "missing-inference-key-default-light"
@@ -45,7 +48,7 @@ struct ReleaseVisualQAConfiguration {
         var windowSize: CGSize {
             switch self {
             case .freshCompactDark:
-                CGSize(width: 1_180, height: 760)
+                CGSize(width: 980, height: 760)
             default:
                 CGSize(width: 1_420, height: 900)
             }
@@ -98,6 +101,18 @@ struct ReleaseVisualQAConfiguration {
         defaults.set(true, forKey: "chessboard.showCoordinates")
         defaults.set(true, forKey: "chessboard.showLegalMoves")
         defaults.set(false, forKey: "coaching.defaultBlunderGuard")
+        if scenario == .sidebarCollapsedDefaultDark ||
+            scenario == .freshCompactDark {
+            defaults.set(
+                "collapsed",
+                forKey: "layout.navigationSidebar.visibilityLaunchOverride"
+            )
+        } else {
+            defaults.set(
+                "expanded",
+                forKey: "layout.navigationSidebar.visibilityLaunchOverride"
+            )
+        }
         return defaults
     }
 
@@ -197,7 +212,9 @@ struct ReleaseVisualQAConfiguration {
              (.installed, .freshDefaultDark),
              (.installed, .freshCompactDark),
              (.installed, .freshDefaultLight),
+             (.installed, .sidebarCollapsedDefaultDark),
              (.installed, .lessonDefaultDark),
+             (.installed, .lessonClockedDefaultDark),
              (.installed, .completedDefaultDark),
              (.installed, .missingInferenceKeyDefaultLight),
              (.installed, .inferenceSettingsDefaultLight):
@@ -361,11 +378,15 @@ enum ReleaseVisualQARunner {
         model.persistence.profile.onboardingComplete = true
         model.persistence.save()
         model.selection = .currentGame
+        let timeControl: TimeControl =
+            configuration.scenario == .lessonClockedDefaultDark
+                ? .rapid10
+                : .none
         model.coordinator.newGame(
             NewGameConfiguration(
                 colorChoice: .white,
                 difficulty: 3,
-                timeControl: .none,
+                timeControl: timeControl,
                 blunderGuardEnabled: false
             )
         )
@@ -374,20 +395,24 @@ enum ReleaseVisualQARunner {
         case .freshDefaultDark,
              .freshCompactDark,
              .freshDefaultLight,
+             .sidebarCollapsedDefaultDark,
              .missingInferenceKeyDefaultLight,
              .installedDefaultDark:
             guard await waitForPreparedPosition(model: model) else {
                 throw ReleaseVisualQAError.positionAnalysisTimedOut
             }
         case .inferenceSettingsDefaultLight:
-            model.openInferenceSettings()
+            guard await waitForPreparedPosition(model: model) else {
+                throw ReleaseVisualQAError.positionAnalysisTimedOut
+            }
+            model.openInferenceSettings(focusTarget: .inferenceKey)
             guard await wait(
                 timeout: .seconds(5),
                 until: { model.selection == .settings }
             ) else {
                 throw ReleaseVisualQAError.inferenceSettingsUnavailable
             }
-        case .lessonDefaultDark:
+        case .lessonDefaultDark, .lessonClockedDefaultDark:
             guard await waitForPreparedPosition(model: model) else {
                 throw ReleaseVisualQAError.positionAnalysisTimedOut
             }
@@ -462,6 +487,13 @@ enum ReleaseVisualQARunner {
         try await Task.sleep(for: .milliseconds(700))
         window.contentView?.layoutSubtreeIfNeeded()
         window.contentView?.superview?.layoutSubtreeIfNeeded()
+        if configuration.scenario == .inferenceSettingsDefaultLight {
+            try exerciseInferenceKeyField(in: window)
+            // A render invalidation spin blocks this main-actor suspension from
+            // resuming. The external scenario timeout then fails the release.
+            try await Task.sleep(for: .seconds(5))
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
         if !NSApplication.shared.isActive || !window.isKeyWindow {
             ReleaseVisualQAConfiguration.writeError(
                 "Chess Coach visual QA: waiting for the real app window to " +
@@ -516,7 +548,7 @@ enum ReleaseVisualQARunner {
                     !(window is NSPanel) &&
                     window.styleMask.contains(.titled) &&
                     window.contentViewController != nil &&
-                    window.frame.width >= 1_000 &&
+                    window.frame.width >= 960 &&
                     window.frame.height >= 650
             }
             .sorted { lhs, rhs in
@@ -562,6 +594,65 @@ enum ReleaseVisualQARunner {
             try? await Task.sleep(for: .milliseconds(50))
         }
         return condition()
+    }
+
+    @MainActor
+    private static func exerciseInferenceKeyField(
+        in window: NSWindow
+    ) throws {
+        guard let contentView = window.contentView,
+              let field = firstSecureTextField(in: contentView)
+        else {
+            throw ReleaseVisualQAError.inferenceSettingsUnavailable
+        }
+
+        let location = field.convert(
+            NSPoint(x: field.bounds.midX, y: field.bounds.midY),
+            to: nil
+        )
+        guard let mouseDown = NSEvent.mouseEvent(
+            with: .leftMouseDown,
+            location: location,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 1,
+            clickCount: 1,
+            pressure: 1
+        ), let mouseUp = NSEvent.mouseEvent(
+            with: .leftMouseUp,
+            location: location,
+            modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime + 0.01,
+            windowNumber: window.windowNumber,
+            context: nil,
+            eventNumber: 2,
+            clickCount: 1,
+            pressure: 0
+        ) else {
+            throw ReleaseVisualQAError.inferenceSettingsUnavailable
+        }
+
+        // NSTextField tracks the mouse in a nested AppKit run loop. Queue the
+        // matching mouse-up first, then deliver the down event synchronously,
+        // reproducing the real pointer/focus path without UI-test privileges.
+        NSApplication.shared.postEvent(mouseUp, atStart: false)
+        window.sendEvent(mouseDown)
+    }
+
+    private static func firstSecureTextField(
+        in view: NSView
+    ) -> NSSecureTextField? {
+        if let field = view as? NSSecureTextField, !field.isHidden {
+            return field
+        }
+        for subview in view.subviews {
+            if let match = firstSecureTextField(in: subview) {
+                return match
+            }
+        }
+        return nil
     }
 
     @MainActor

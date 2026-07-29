@@ -120,17 +120,24 @@ struct CurrentGameView: View {
                 if coordinator.teachingMoment != nil, !isCoachPresented {
                     Button(action: onShowCoach) {
                         Label(
-                            "Teaching moment paused · Show Coach",
-                            systemImage: "pause.circle.fill"
+                            coordinator.configuration.timeControl.usesClock
+                                ? "Teaching moment paused · Show Coach"
+                                : "Teaching moment · Show Coach",
+                            systemImage:
+                                coordinator.configuration.timeControl.usesClock
+                                    ? "pause.circle.fill"
+                                    : "lightbulb.fill"
                         )
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
                     .tint(Color.coachGreen)
                     .padding(14)
-                    .help("Show the paused teaching moment")
+                    .help("Show the teaching moment")
                     .accessibilityHint(
-                        "Opens Coach without resuming the game clock"
+                        coordinator.configuration.timeControl.usesClock
+                            ? "Opens Coach without resuming the game clock"
+                            : "Opens Coach without changing the position"
                     )
                 }
             }
@@ -617,11 +624,14 @@ private struct BoardFooter: View {
             Group {
                 if coordinator.status.isFinished {
                     Label(coordinator.status.message, systemImage: "flag.checkered")
-                } else if coordinator.teachingMoment != nil {
+                } else if coordinator.teachingMoment != nil,
+                          coordinator.configuration.timeControl.usesClock {
                     Label(
                         "Teaching moment · game paused",
                         systemImage: "pause.fill"
                     )
+                } else if coordinator.teachingMoment != nil {
+                    Text("Your move")
                 } else if coordinator.isEngineThinking {
                     HStack(spacing: 6) {
                         ProgressView()
