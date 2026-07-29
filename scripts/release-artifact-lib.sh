@@ -99,6 +99,36 @@ release_artifact_candidate_app() {
   print "${candidate_dir}/ChessCoach.xcarchive/Products/Applications/ChessCoach.app"
 }
 
+release_artifact_place_archive() {
+  local archive_path=$1
+  local candidate_dir=$2
+
+  [[ -d "${archive_path}" ]] || {
+    release_artifact_die "Prepared archive does not exist: ${archive_path}"
+    return 1
+  }
+  [[ ! -e "${candidate_dir}" ]] || {
+    release_artifact_die "Candidate already exists and will not be overwritten: ${candidate_dir}"
+    return 1
+  }
+
+  # The executable hash is the final directory component, so the candidate
+  # directory itself must exist before placing the archive inside it.
+  mkdir -p "${candidate_dir:h}" || {
+    release_artifact_die "Could not create candidate parent directory: ${candidate_dir:h}"
+    return 1
+  }
+  mkdir "${candidate_dir}" || {
+    release_artifact_die "Could not create candidate directory: ${candidate_dir}"
+    return 1
+  }
+  mv "${archive_path}" "${candidate_dir}/ChessCoach.xcarchive" || {
+    rmdir "${candidate_dir}" 2>/dev/null || true
+    release_artifact_die "Could not place the prepared archive in ${candidate_dir}."
+    return 1
+  }
+}
+
 release_artifact_receipt_for_app() {
   local app_path=${1:A}
   local suffix="/ChessCoach.xcarchive/Products/Applications/ChessCoach.app"
