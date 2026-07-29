@@ -50,14 +50,21 @@ The harness captures these full windows:
 
 - `fresh-default-dark`: the first game at the normal window size in Dark Mode.
 - `fresh-compact-dark`: the first game at the minimum supported window size in
-  Dark Mode.
+  Dark Mode, with the navigation sidebar collapsed to preserve the board and
+  Coach.
 - `fresh-default-light`: the first game at the normal size in Light Mode.
-- `lesson-default-dark`: an open teaching moment with its fixed controls.
+- `sidebar-collapsed-default-dark`: the native navigation sidebar collapsed
+  while the game and Coach remain usable.
+- `lesson-default-dark`: an unclocked teaching moment with inline Reveal and
+  quiet Done controls.
+- `lesson-clocked-default-dark`: a clocked teaching moment with its explicit
+  paused status and Continue control.
 - `completed-default-dark`: a finished game with its compact Coach treatment.
 - `missing-inference-key-default-light`: the live Coach warning and working
   route shown when no inference credential is configured.
-- `inference-settings-default-light`: the main Settings screen scrolled to and
-  focused on the provider-neutral Inference section.
+- `inference-settings-default-light`: the main Settings screen scrolled to,
+  focused on, and pointer-tested through the provider-neutral Inference key
+  field. The process must remain responsive for five seconds afterward.
 
 The candidate harness uses an in-memory credential store. Ordinary coaching
 scenes use a keyless custom OpenAI-compatible provider pointed at a closed local
@@ -106,7 +113,7 @@ The command verifies the evidence, opens the contact sheet, asks for the
 reviewer's name, and requires them to type `APPROVE <commit>`. It records the
 commit and manifest SHA-256 in `approval.tsv`.
 
-Before approving, inspect all seven labeled windows and confirm:
+Before approving, inspect every labeled window in the required scenario list and confirm:
 
 - The navigation sidebar, game area, move list, and Coach inspector are all
   visible and separated correctly.
@@ -146,7 +153,7 @@ normally and waits for it; it never silently force-quits a game.
 
 The package keeps a hidden provisional filename throughout notarization,
 installation, installed-window review, and prompt-free runtime review. Publish
-promotes it to `Chess-Coach-0.1.0-beta.8.dmg` and writes the checksum only after
+promotes it to `Chess-Coach-0.1.0-beta.9.dmg` and writes the checksum only after
 every gate passes. A failed or interrupted run removes the provisional package
 and restores the prior installed app.
 
@@ -170,10 +177,11 @@ approval does it launch the app normally and require a stable process at the
 exact installed executable path.
 
 A screenshot cannot prove that macOS did not present a SecurityAgent dialog.
-Publish therefore has a final, separate runtime gate. Beta 8 uses a fresh,
+Publish therefore has a final, separate runtime gate. Beta 9 uses the
 provider-isolated credential service, never reads or migrates legacy
 provider-specific entries, and explicitly prohibits authentication UI during
-credential operations. The gate also uses a separate release-QA-only service
+credential operations. It also rejects sustained app-process CPU or memory
+growth that would indicate a render spin. The gate uses a separate release-QA-only service
 and a UUID-scoped disposable account; neither can overlap an inference provider
 service or account. The gate:
 

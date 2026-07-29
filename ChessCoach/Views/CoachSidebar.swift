@@ -7,7 +7,7 @@ struct CoachSidebar: View {
     var isGameContextVisible = true
     var embedsScrollableTimeline = true
     var initialRoutes: [CoachInspectorRoute] = []
-    var onConfigureInference: () -> Void = {}
+    var onConfigureInference: (InferenceConfigurationIssue) -> Void = { _ in }
 
     var body: some View {
         CoachInspectorContainer(
@@ -24,18 +24,19 @@ struct CoachInspectorContainer: View {
     @Bindable var coordinator: GameCoordinator
     @Bindable var inferenceSettings: InferenceSettings
     var isGameContextVisible = true
-    let onConfigureInference: () -> Void
+    let onConfigureInference: (InferenceConfigurationIssue) -> Void
 
     @State private var routePath: [CoachInspectorRoute] = []
     @State private var question = ""
-    @State private var showsSettings = false
 
     init(
         coordinator: GameCoordinator,
         inferenceSettings: InferenceSettings,
         isGameContextVisible: Bool = true,
         initialRoutes: [CoachInspectorRoute] = [],
-        onConfigureInference: @escaping () -> Void = {}
+        onConfigureInference: @escaping (InferenceConfigurationIssue) -> Void = {
+            _ in
+        }
     ) {
         self.coordinator = coordinator
         self.inferenceSettings = inferenceSettings
@@ -84,6 +85,7 @@ struct CoachInspectorContainer: View {
             isEngineThinking: coordinator.isEngineThinking,
             hasBlunderWarning: coordinator.blunderWarning != nil,
             isHistoryPreviewActive: coordinator.historyPreview != nil,
+            usesClock: coordinator.configuration.timeControl.usesClock,
             preparationState: coordinator.coachPreparationState,
             teachingMoment: coordinator.teachingMoment,
             canTakeBack: coordinator.canTakeBack,
@@ -107,11 +109,8 @@ struct CoachInspectorContainer: View {
                 historyCount: presentation.earlierItemCount,
                 onHistory: showHistory,
                 onTakeBack: coordinator.takeBack,
-                onSettings: { showsSettings.toggle() }
+                onTrailingAction: performHeaderAction
             )
-            .popover(isPresented: $showsSettings, arrowEdge: .top) {
-                CoachSettingsPopover()
-            }
 
             Divider()
 
@@ -174,13 +173,28 @@ struct CoachInspectorContainer: View {
 
     @ViewBuilder
     private var inspectorFooter: some View {
-        let showsNotice =
-            isGameContextVisible && !coordinator.errorMessage.isEmpty
-        if shouldShowComposer || showsNotice {
-            VStack(spacing: 0) {
-                Divider()
+        if routePath.last != .history {
+            switch presentation.footer {
+            case .hidden:
+                EmptyView()
+            case .providerSetup(let issue):
+                VStack(spacing: 0) {
+                    Divider()
+                    CoachProviderSetupFooter(
+                        issue: issue,
+                        onConfigure: onConfigureInference
+                    )
+                }
+                .frame(maxWidth: .infinity)
+                .background(.bar)
+            case .composer(let presentationNotice):
+                let notice = coordinator.errorMessage.isEmpty
+                    ? presentationNotice
+                    : coordinator.errorMessage
 
-                if shouldShowComposer {
+                VStack(spacing: 0) {
+                    Divider()
+
                     CoachComposer(
                         question: $question,
                         title: composerTitle,
@@ -188,20 +202,18 @@ struct CoachInspectorContainer: View {
                         isWorking: coordinator.isCoachWorking,
                         onSend: send
                     )
-                }
 
-                if showsNotice {
-                    if shouldShowComposer {
+                    if let notice, !notice.isEmpty {
                         Divider()
+                        CoachInspectorNotice(
+                            text: notice,
+                            onDismiss: coordinator.clearError
+                        )
                     }
-                    CoachInspectorNotice(
-                        text: coordinator.errorMessage,
-                        onDismiss: coordinator.clearError
-                    )
                 }
+                .frame(maxWidth: .infinity)
+                .background(.bar)
             }
-            .frame(maxWidth: .infinity)
-            .background(Color(nsColor: .windowBackgroundColor))
         }
     }
 
@@ -222,12 +234,10 @@ struct CoachInspectorContainer: View {
             )
         case .live:
             LiveCoachWorkspace(
-                chatState: coordinator.coachChatState,
                 currentConversationCount: currentConversationItems.count,
                 onConversation: {
                     routePath.append(.conversation(.currentPosition))
-                },
-                onConfigureInference: onConfigureInference
+                }
             )
         case .reviewing:
             HistoryReviewWorkspace()
@@ -243,8 +253,10 @@ struct CoachInspectorContainer: View {
                 moment: coordinator.teachingMoment,
                 variations: preparedVariations,
                 playerSide: coordinator.playerSide,
+                usesClock: coordinator.configuration.timeControl.usesClock,
                 questionCount: currentConversationItems.count,
                 onConversation: showLessonConversation,
+                onReveal: coordinator.revealHint,
                 onExploreVariation: exploreVariation
             )
         case .completed:
@@ -284,6 +296,16 @@ struct CoachInspectorContainer: View {
                         variationRank: rank,
                         step: step
                     )
+                },
+                onPrevious: {
+                    coordinator.stepTeachingPreview(by: -1)
+                },
+                onNext: {
+                    coordinator.stepTeachingPreview(by: 1)
+                },
+                onReturnToPosition: {
+                    coordinator.returnFromTeachingPreview()
+                    popRoute()
                 }
             )
             .onExitCommand {
@@ -332,6 +354,14 @@ struct CoachInspectorContainer: View {
         }
     }
 
+    private func performHeaderAction(_ action: CoachHeaderAction) {
+        switch action {
+        case .continuePlaying:
+            coordinator.continueTeachingMoment()
+            routePath.removeAll()
+        }
+    }
+
     private func exploreVariation(_ rank: Int) {
         coordinator.setTeachingPreview(variationRank: rank, step: 0)
         if routePath.last != .variation(rank: rank) {
@@ -352,15 +382,6 @@ struct CoachInspectorContainer: View {
             routePath.append(.conversation(conversationScope))
         }
         coordinator.sendChat(value)
-    }
-
-    private var shouldShowComposer: Bool {
-        guard presentation.showsComposer,
-              routePath.last != .history
-        else {
-            return false
-        }
-        return true
     }
 
     private var conversationScope: CoachConversationScope {
@@ -554,69 +575,5 @@ private extension CoachThreadItem {
         case .turn(let turn), .pending(let turn):
             turn.question.createdAt
         }
-    }
-}
-
-struct CoachSettingsPopover: View {
-    @AppStorage(ChessBoardPreferences.moveMethodKey)
-    private var moveMethod =
-        ChessBoardPreferences.MoveMethod.clickAndDrag.rawValue
-    @AppStorage(ChessBoardPreferences.showLegalMarkersKey)
-    private var showLegalMarkers = true
-    @AppStorage(ChessBoardPreferences.showCoordinatesKey)
-    private var showCoordinates = true
-    @AppStorage(ChessBoardPreferences.animationsEnabledKey)
-    private var animationsEnabled = true
-    @AppStorage(ChessBoardPreferences.pieceStyleKey)
-    private var pieceStyle = ChessBoardPreferences.PieceStyle.merida.rawValue
-    @AppStorage("coaching.defaultBlunderGuard")
-    private var defaultBlunderGuard = false
-
-    var body: some View {
-        Form {
-            Section("Board") {
-                Picker("Move method", selection: $moveMethod) {
-                    Text("Click and drag")
-                        .tag(
-                            ChessBoardPreferences.MoveMethod
-                                .clickAndDrag.rawValue
-                        )
-                    Text("Click only")
-                        .tag(
-                            ChessBoardPreferences.MoveMethod.clickOnly.rawValue
-                        )
-                    Text("Drag only")
-                        .tag(
-                            ChessBoardPreferences.MoveMethod.dragOnly.rawValue
-                        )
-                }
-
-                Toggle("Legal move markers", isOn: $showLegalMarkers)
-                Toggle("Coordinates", isOn: $showCoordinates)
-                Toggle("Animations", isOn: $animationsEnabled)
-
-                Picker("Piece style", selection: $pieceStyle) {
-                    Text("Sashité Merida")
-                        .tag(
-                            ChessBoardPreferences.PieceStyle.merida.rawValue
-                        )
-                    Text("Chessnut")
-                        .tag(
-                            ChessBoardPreferences.PieceStyle.chessnut.rawValue
-                        )
-                }
-            }
-
-            Section("Coaching") {
-                Toggle(
-                    "Blunder Guard for new games",
-                    isOn: $defaultBlunderGuard
-                )
-            }
-        }
-        .formStyle(.grouped)
-        .frame(width: 350)
-        .padding(.vertical, 8)
-        .accessibilityLabel("Coach and board settings")
     }
 }

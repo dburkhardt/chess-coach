@@ -5,7 +5,7 @@ struct CoachInspectorHeader: View {
     let historyCount: Int
     let onHistory: () -> Void
     let onTakeBack: () -> Void
-    let onSettings: () -> Void
+    let onTrailingAction: (CoachHeaderAction) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -48,14 +48,29 @@ struct CoachInspectorHeader: View {
                     .fixedSize()
                 }
 
-                if presentation.showsSettings {
-                    Button(action: onSettings) {
-                        Image(systemName: "gearshape")
+                if let action = presentation.trailingAction {
+                    Button {
+                        onTrailingAction(action.action)
+                    } label: {
+                        if let systemImage = action.systemImage {
+                            Label(action.label, systemImage: systemImage)
+                        } else {
+                            Text(action.label)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .help("Coach and board settings")
-                    .accessibilityLabel("Coach and board settings")
-                    .accessibilityIdentifier("coach-settings")
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(
+                        action.style == .resume
+                            ? Color.coachGreen
+                            : Color.secondary
+                    )
+                    .font(.subheadline.weight(.semibold))
+                    .help(
+                        action.style == .resume
+                            ? "Resume the game clock"
+                            : "Close the teaching moment"
+                    )
+                    .accessibilityIdentifier("coach-lesson-dismiss")
                     .fixedSize()
                 }
             }
@@ -201,10 +216,8 @@ struct CoachEmptyWorkspace: View {
 }
 
 struct LiveCoachWorkspace: View {
-    let chatState: CoachChatState
     let currentConversationCount: Int
     let onConversation: () -> Void
-    let onConfigureInference: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -216,13 +229,6 @@ struct LiveCoachWorkspace: View {
                     action: onConversation
                 )
             }
-
-            if case .unavailable(let issue) = chatState {
-                InferenceConfigurationNotice(
-                    issue: issue,
-                    onConfigure: onConfigureInference
-                )
-            }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
         .accessibilityElement(children: .contain)
@@ -230,36 +236,49 @@ struct LiveCoachWorkspace: View {
     }
 }
 
-struct InferenceConfigurationNotice: View {
+struct CoachProviderSetupFooter: View {
     let issue: InferenceConfigurationIssue
-    let onConfigure: () -> Void
+    let onConfigure: (InferenceConfigurationIssue) -> Void
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 7) {
-            Image(systemName: "exclamationmark.circle")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            Text(message)
-                .foregroundStyle(.secondary)
-            Button("Configure here", action: onConfigure)
-                .buttonStyle(.link)
-                .accessibilityIdentifier("configure-inference")
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 8) {
+                providerStatus
+                Spacer(minLength: 4)
+                setupButton
+            }
+
+            VStack(alignment: .leading, spacing: 5) {
+                providerStatus
+                setupButton
+            }
         }
         .font(.caption)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(message) Configure here")
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            "No LLM provider set up. Set Up LLM Provider"
+        )
+        .accessibilityIdentifier("coach-provider-setup")
     }
 
-    private var message: String {
-        switch issue {
-        case .missingKey:
-            "No inference key configured."
-        case .missingEndpoint:
-            "No inference endpoint configured."
-        case .missingModel:
-            "No inference model configured."
+    private var providerStatus: some View {
+        Label(
+            "No LLM provider set up.",
+            systemImage: "exclamationmark.circle"
+        )
+        .foregroundStyle(.secondary)
+    }
+
+    private var setupButton: some View {
+        Button("Set Up LLM Provider") {
+            onConfigure(issue)
         }
+            .buttonStyle(.link)
+            .accessibilityIdentifier("configure-inference")
     }
 }
 
@@ -288,8 +307,10 @@ struct TeachingWorkspace: View {
     let moment: TeachingMomentState?
     let variations: [CoachVariationPresentation]
     let playerSide: ChessSide
+    let usesClock: Bool
     let questionCount: Int
     let onConversation: () -> Void
+    let onReveal: () -> Void
     let onExploreVariation: (Int) -> Void
 
     var body: some View {
@@ -327,17 +348,31 @@ struct TeachingWorkspace: View {
                     .controlSize(.small)
                 Text("Preparing your lesson")
                     .font(.title3.weight(.semibold))
-                Text("Your position and clock remain paused.")
+                Text(
+                    usesClock
+                        ? "Your position and clock remain paused."
+                        : "Your position stays fixed while the lesson is prepared."
+                )
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         case .concept(let hint):
-            LessonSection(
-                eyebrow: "What to notice",
-                title: "Find the idea",
-                detail: hint.concept,
-                tint: .coachGreen
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                LessonSection(
+                    eyebrow: "What to notice",
+                    title: "Find the idea",
+                    detail: hint.concept,
+                    tint: .coachGreen
+                )
+
+                Button(action: onReveal) {
+                    Label("Reveal Move", systemImage: "arrow.right")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.blue)
+                .accessibilityIdentifier("coach-reveal-move")
+            }
         case .revealed(let hint):
             revealed(hint)
         case .previewing(let hint, _, _):
@@ -412,6 +447,22 @@ struct TeachingWorkspace: View {
             }
             .font(.subheadline.weight(.semibold))
 
+            if let primary {
+                Button {
+                    onExploreVariation(primary.rank)
+                } label: {
+                    Label(
+                        "Explore Engine Line",
+                        systemImage:
+                            "point.topleft.down.to.point.bottomright.curvepath"
+                    )
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(.blue)
+                .accessibilityIdentifier("coach-explore-engine-line")
+            }
+
             if !alternatives.isEmpty {
                 DisclosureGroup("Other engine ideas") {
                     VStack(alignment: .leading, spacing: 8) {
@@ -471,6 +522,9 @@ struct EngineLineWorkspace: View {
     let selectedStep: Int
     let playerSide: ChessSide
     let onSelectStep: (Int) -> Void
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+    let onReturnToPosition: () -> Void
 
     var body: some View {
         ScrollView {
@@ -508,6 +562,54 @@ struct EngineLineWorkspace: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     }
+
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 7) {
+                            previewButton(
+                                "Back",
+                                systemImage: "chevron.left",
+                                action: onPrevious,
+                                isEnabled: selectedStep > 0
+                            )
+                            previewButton(
+                                "Next",
+                                systemImage: "chevron.right",
+                                action: onNext,
+                                isEnabled:
+                                    selectedStep < variation.moves.count
+                            )
+                            Spacer(minLength: 0)
+                            Button(
+                                "Return to Position",
+                                action: onReturnToPosition
+                            )
+                            .buttonStyle(.bordered)
+                        }
+
+                        VStack(alignment: .leading, spacing: 7) {
+                            HStack(spacing: 7) {
+                                previewButton(
+                                    "Back",
+                                    systemImage: "chevron.left",
+                                    action: onPrevious,
+                                    isEnabled: selectedStep > 0
+                                )
+                                previewButton(
+                                    "Next",
+                                    systemImage: "chevron.right",
+                                    action: onNext,
+                                    isEnabled:
+                                        selectedStep < variation.moves.count
+                                )
+                            }
+                            Button(
+                                "Return to Position",
+                                action: onReturnToPosition
+                            )
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .controlSize(.small)
 
                     ScrollView(.horizontal) {
                         HStack(spacing: 7) {
@@ -549,6 +651,19 @@ struct EngineLineWorkspace: View {
         .navigationTitle("Engine Line")
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Engine line preview")
+    }
+
+    private func previewButton(
+        _ label: String,
+        systemImage: String,
+        action: @escaping () -> Void,
+        isEnabled: Bool
+    ) -> some View {
+        Button(action: action) {
+            Label(label, systemImage: systemImage)
+        }
+        .buttonStyle(.bordered)
+        .disabled(!isEnabled)
     }
 }
 
@@ -783,26 +898,24 @@ struct CoachComposer: View {
             .frame(maxWidth: .infinity)
         }
         .padding(12)
-        .background(
-            Color(nsColor: .controlBackgroundColor),
-            in: RoundedRectangle(cornerRadius: 11)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 11)
-                .stroke(
-                    Color.secondary.opacity(
-                        controlActiveState == .inactive ? 0.42 : 0.24
-                    ),
-                    lineWidth: 1
-                )
+        .background {
+            if presentation == .inline {
+                RoundedRectangle(cornerRadius: 11)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            }
         }
-        .padding(.horizontal, presentation == .footer ? 12 : 0)
-        .padding(.vertical, presentation == .footer ? 10 : 0)
-        .background(
-            presentation == .footer
-                ? Color(nsColor: .windowBackgroundColor)
-                : Color.clear
-        )
+        .overlay {
+            if presentation == .inline {
+                RoundedRectangle(cornerRadius: 11)
+                    .stroke(
+                        Color.secondary.opacity(
+                            controlActiveState == .inactive ? 0.42 : 0.24
+                        ),
+                        lineWidth: 1
+                    )
+            }
+        }
+        .padding(.horizontal, presentation == .footer ? 2 : 0)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(title)
         .accessibilityIdentifier("coach-composer")

@@ -142,6 +142,45 @@ verify_running_pid() {
     visual_qa_die "Process ${pid} is not the exact installed Chess Coach executable."
 }
 
+verify_runtime_responsiveness() {
+  local pid=$1
+  local initial_rss
+  local rss
+  local cpu
+  local high_cpu_samples=0
+  local sample_index=0
+
+  initial_rss=$(ps -p "${pid}" -o rss= | tr -d '[:space:]')
+  [[ "${initial_rss}" == <-> ]] ||
+    visual_qa_die "Could not read Chess Coach's initial memory use."
+
+  while (( sample_index < OBSERVATION_SECONDS )); do
+    verify_running_pid "${pid}"
+    cpu=$(ps -p "${pid}" -o %cpu= | tr -d '[:space:]')
+    rss=$(ps -p "${pid}" -o rss= | tr -d '[:space:]')
+    [[ -n "${cpu}" && "${rss}" == <-> ]] ||
+      visual_qa_die "Could not sample Chess Coach's runtime health."
+
+    if awk -v value="${cpu}" 'BEGIN { exit !(value > 80.0) }'; then
+      (( high_cpu_samples += 1 ))
+    else
+      high_cpu_samples=0
+    fi
+    (( high_cpu_samples < 5 )) ||
+      visual_qa_die \
+        "Chess Coach stayed above 80% CPU for five seconds; possible render spin."
+
+    (( rss - initial_rss <= 102400 )) ||
+      visual_qa_die \
+        "Chess Coach grew by more than 100 MB during the idle runtime check."
+
+    sleep 1
+    (( sample_index += 1 ))
+  done
+
+  RESPONSIVENESS_PROBE_RESULT="cpu-and-rss-stable"
+}
+
 wait_for_app_to_start() {
   local elapsed=0
   local pid=""
@@ -158,6 +197,7 @@ wait_for_app_to_start() {
 RUNTIME_PROBE_ID=""
 RUNTIME_PROBE_NEEDS_CLEANUP=0
 CREDENTIAL_PROBE_RESULT=""
+RESPONSIVENESS_PROBE_RESULT=""
 RUNTIME_PROBE_TIMEOUT_SECONDS=15
 RUNTIME_PROBE_CHILD_PID=""
 RUNTIME_PROBE_WATCHDOG_PID=""
@@ -285,7 +325,7 @@ print "Prompt-free runtime gate"
 print "------------------------"
 print "The exact installed app is running normally."
 print
-print "Beta 8 uses a fresh provider-neutral Keychain service and never migrates"
+print "Beta 9 uses a provider-neutral Keychain service and never migrates"
 print "legacy credentials, so no Chess Coach Keychain or login-password prompt"
 print "should appear. If one did, cancel"
 print "this release and investigate; do not enter a password."
@@ -321,7 +361,9 @@ print
 print "Observe the freshly launched app for ${OBSERVATION_SECONDS} seconds."
 print "Do not approve if macOS displays any Chess Coach Keychain or password prompt."
 print "No password belongs in this terminal."
-sleep "${OBSERVATION_SECONDS}"
+print "The release gate is also checking for the sustained CPU and memory growth"
+print "that characterized the beta.8 Settings render spin."
+verify_runtime_responsiveness "${VERIFICATION_PID}"
 
 # Verify the artifact and process again after the observation window so an app
 # replacement, crash, or relaunch cannot inherit the approval.
@@ -359,6 +401,7 @@ RUNTIME_APPROVAL_TEMP=$(mktemp "${TMPDIR:-/tmp}/chess-coach-runtime-approval.XXX
   print -r -- $'executableSHA256\t'"${APP_EXECUTABLE_SHA}"
   print -r -- $'codeDirectoryHash\t'"${APP_CDHASH}"
   print -r -- $'credentialProbeResult\t'"${CREDENTIAL_PROBE_RESULT}"
+  print -r -- $'responsivenessProbeResult\t'"${RESPONSIVENESS_PROBE_RESULT}"
   print -r -- $'verifiedPID\t'"${VERIFICATION_PID}"
   print -r -- $'observationSeconds\t'"${OBSERVATION_SECONDS}"
   print -r -- $'approvedBy\t'"${APPROVER}"
@@ -375,11 +418,13 @@ RUNTIME_APPROVAL="${INSTALLED_EVIDENCE}/runtime-approval.tsv"
     "$(visual_qa_manifest_value "${RUNTIME_APPROVAL}" installedVisualApprovalSHA256)" == "${INSTALLED_APPROVAL_SHA}" &&
     "$(visual_qa_manifest_value "${RUNTIME_APPROVAL}" executableSHA256)" == "${APP_EXECUTABLE_SHA}" &&
     "$(visual_qa_manifest_value "${RUNTIME_APPROVAL}" codeDirectoryHash)" == "${APP_CDHASH}" &&
-    "$(visual_qa_manifest_value "${RUNTIME_APPROVAL}" credentialProbeResult)" == "seed-read-across-process-delete" ]] ||
+    "$(visual_qa_manifest_value "${RUNTIME_APPROVAL}" credentialProbeResult)" == "seed-read-across-process-delete" &&
+    "$(visual_qa_manifest_value "${RUNTIME_APPROVAL}" responsivenessProbeResult)" == "cpu-and-rss-stable" ]] ||
   visual_qa_die "Prompt-free runtime approval does not match the installed artifact."
 
 print
 print "Prompt-free normal launch approved by ${APPROVER}."
 print "Disposable credential persisted across processes and was deleted."
+print "CPU and memory remained stable during the observation window."
 print "Running PID: ${VERIFICATION_PID}"
 print "Evidence: ${RUNTIME_APPROVAL}"

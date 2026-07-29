@@ -5,16 +5,38 @@ enum SettingsDestination: Hashable, Sendable {
     case inference
 }
 
+enum SettingsFocusTarget: Hashable, Sendable {
+    case inferenceKey
+    case endpoint
+    case modelID
+}
+
+extension InferenceConfigurationIssue {
+    var settingsFocusTarget: SettingsFocusTarget {
+        switch self {
+        case .missingKey:
+            .inferenceKey
+        case .missingEndpoint:
+            .endpoint
+        case .missingModel:
+            .modelID
+        }
+    }
+}
+
 struct SettingsNavigationRequest: Equatable, Identifiable, Sendable {
     let id: UUID
     let destination: SettingsDestination
+    let focusTarget: SettingsFocusTarget
 
     init(
         id: UUID = UUID(),
-        destination: SettingsDestination
+        destination: SettingsDestination,
+        focusTarget: SettingsFocusTarget = .inferenceKey
     ) {
         self.id = id
         self.destination = destination
+        self.focusTarget = focusTarget
     }
 }
 
@@ -59,9 +81,12 @@ final class AppModel {
         selection = .currentGame
     }
 
-    func openInferenceSettings() {
+    func openInferenceSettings(
+        focusTarget: SettingsFocusTarget = .inferenceKey
+    ) {
         settingsNavigationRequest = SettingsNavigationRequest(
-            destination: .inference
+            destination: .inference,
+            focusTarget: focusTarget
         )
         selection = .settings
     }

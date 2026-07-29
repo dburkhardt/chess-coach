@@ -66,7 +66,7 @@ MANIFEST_SHA=$(visual_qa_sha256 "${MANIFEST}")
 
 open "${CONTACT_SHEET}"
 print
-print "Inspect all seven labeled whole-window captures in:"
+print "Inspect every labeled whole-window capture in:"
 print "  ${CONTACT_SHEET}"
 print
 

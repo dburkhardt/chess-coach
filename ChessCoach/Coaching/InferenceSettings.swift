@@ -55,6 +55,17 @@ enum InferenceCredentialState: Equatable, Sendable {
     case stored
 }
 
+/// A value-only view of credential availability that is safe for SwiftUI to
+/// observe. It deliberately contains no credential material.
+struct InferenceCredentialSnapshot: Equatable, Sendable {
+    let provider: InferenceProviderKind
+    let state: InferenceCredentialState
+    let hasStoredKey: Bool
+    let hasSessionKey: Bool
+    let persistenceAvailability: CredentialPersistenceAvailability
+    let storeError: String?
+}
+
 enum InferenceConfigurationIssue: Equatable, Sendable {
     case missingKey
     case missingEndpoint
@@ -100,7 +111,8 @@ final class InferenceSettings {
     var provider: InferenceProviderKind {
         didSet {
             defaults.set(provider.rawValue, forKey: Keys.provider)
-            loadStoredKeyIfNeeded(for: provider)
+            loadStoredKey(for: provider)
+            refreshCredentialSnapshot()
         }
     }
     var customEndpoint: String {
@@ -116,14 +128,21 @@ final class InferenceSettings {
     var statusMessage = ""
     var isWorking = false
 
-    private(set) var credentialPersistenceAvailability:
-        CredentialPersistenceAvailability
-    private(set) var credentialStoreError: String?
+    private(set) var credentialSnapshot: InferenceCredentialSnapshot
 
+    @ObservationIgnored
     private let defaults: UserDefaults
+    @ObservationIgnored
     private let keychain: any KeychainStoring
+    @ObservationIgnored
+    private var persistenceAvailability: CredentialPersistenceAvailability
+    @ObservationIgnored
+    private var storeError: String?
+    @ObservationIgnored
     private var storedKeys: [InferenceProviderKind: String] = [:]
+    @ObservationIgnored
     private var sessionKeys: [InferenceProviderKind: String] = [:]
+    @ObservationIgnored
     private var loadedProviders: Set<InferenceProviderKind> = []
 
     init(
@@ -132,17 +151,27 @@ final class InferenceSettings {
     ) {
         self.defaults = defaults
         self.keychain = keychain
-        self.credentialPersistenceAvailability =
-            keychain.persistenceAvailability
-        self.provider = InferenceProviderKind(
+        self.persistenceAvailability = keychain.persistenceAvailability
+        self.storeError = nil
+        let selectedProvider = InferenceProviderKind(
             rawValue: defaults.string(forKey: Keys.provider) ?? ""
         ) ?? .openAI
+        self.provider = selectedProvider
         self.customEndpoint = defaults.string(forKey: Keys.customEndpoint) ?? ""
         self.modelID = defaults.string(forKey: Keys.modelID) ?? ""
         self.apiMode = InferenceAPIMode(
             rawValue: defaults.string(forKey: Keys.apiMode) ?? ""
         ) ?? .automatic
-        loadStoredKeyIfNeeded(for: provider)
+        self.credentialSnapshot = InferenceCredentialSnapshot(
+            provider: selectedProvider,
+            state: .missing,
+            hasStoredKey: false,
+            hasSessionKey: false,
+            persistenceAvailability: keychain.persistenceAvailability,
+            storeError: nil
+        )
+        loadStoredKey(for: selectedProvider)
+        refreshCredentialSnapshot()
     }
 
     var configuration: InferenceConfiguration {
@@ -155,13 +184,15 @@ final class InferenceSettings {
     }
 
     var credentialState: InferenceCredentialState {
-        credentialState(for: provider)
+        credentialSnapshot.state
     }
 
     func credentialState(
         for provider: InferenceProviderKind
     ) -> InferenceCredentialState {
-        loadStoredKeyIfNeeded(for: provider)
+        if provider == self.provider {
+            return credentialSnapshot.state
+        }
         if !(sessionKeys[provider] ?? "").isEmpty {
             return .sessionOnly
         }
@@ -175,7 +206,9 @@ final class InferenceSettings {
         for provider: InferenceProviderKind? = nil
     ) -> String {
         let selectedProvider = provider ?? self.provider
-        loadStoredKeyIfNeeded(for: selectedProvider)
+        if selectedProvider == self.provider {
+            _ = credentialSnapshot
+        }
         let session = sessionKeys[selectedProvider] ?? ""
         return session.isEmpty
             ? storedKeys[selectedProvider] ?? ""
@@ -183,12 +216,20 @@ final class InferenceSettings {
     }
 
     var hasStoredKey: Bool {
-        loadStoredKeyIfNeeded(for: provider)
-        return !(storedKeys[provider] ?? "").isEmpty
+        credentialSnapshot.hasStoredKey
     }
 
     var hasSessionKey: Bool {
-        !(sessionKeys[provider] ?? "").isEmpty
+        credentialSnapshot.hasSessionKey
+    }
+
+    var credentialPersistenceAvailability:
+        CredentialPersistenceAvailability {
+        credentialSnapshot.persistenceAvailability
+    }
+
+    var credentialStoreError: String? {
+        credentialSnapshot.storeError
     }
 
     var configurationIssue: InferenceConfigurationIssue? {
@@ -210,17 +251,22 @@ final class InferenceSettings {
     }
 
     func useKeyForSession(_ key: String) {
+        loadStoredKey(for: provider)
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         sessionKeys[provider] = trimmed.isEmpty ? nil : trimmed
-        credentialStoreError = nil
+        storeError = nil
+        refreshCredentialSnapshot()
     }
 
     func clearSessionKey() {
+        loadStoredKey(for: provider)
         sessionKeys[provider] = nil
+        refreshCredentialSnapshot()
     }
 
     func savePersistentKey(_ key: String) throws {
-        guard credentialPersistenceAvailability == .persistent else {
+        loadStoredKey(for: provider)
+        guard persistenceAvailability == .persistent else {
             throw KeychainError.installedSignedAppRequired
         }
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -233,13 +279,14 @@ final class InferenceSettings {
         }
         sessionKeys[provider] = nil
         loadedProviders.insert(provider)
-        credentialStoreError = nil
+        storeError = nil
+        refreshCredentialSnapshot()
     }
 
     /// Compatibility entry point. Development and relocated builds retain the
     /// key for this process only; the installed signed app stores it in Keychain.
     func saveKey(_ key: String) throws {
-        if credentialPersistenceAvailability == .persistent {
+        if persistenceAvailability == .persistent {
             try savePersistentKey(key)
         } else {
             useKeyForSession(key)
@@ -247,13 +294,15 @@ final class InferenceSettings {
     }
 
     func removeKey() throws {
-        if credentialPersistenceAvailability == .persistent {
+        loadStoredKey(for: provider)
+        if persistenceAvailability == .persistent {
             try keychain.delete(account: provider.rawValue)
         }
         storedKeys[provider] = nil
         sessionKeys[provider] = nil
         loadedProviders.insert(provider)
-        credentialStoreError = nil
+        storeError = nil
+        refreshCredentialSnapshot()
     }
 
     /// A newly typed key wins over the session key, which wins over the stored
@@ -263,18 +312,41 @@ final class InferenceSettings {
         return trimmed.isEmpty ? existingKey() : trimmed
     }
 
-    private func loadStoredKeyIfNeeded(
-        for provider: InferenceProviderKind
-    ) {
+    private func loadStoredKey(for provider: InferenceProviderKind) {
         guard loadedProviders.insert(provider).inserted else { return }
-        guard credentialPersistenceAvailability == .persistent else { return }
+        guard persistenceAvailability == .persistent else { return }
         do {
             storedKeys[provider] =
                 (try keychain.read(account: provider.rawValue)) ?? ""
         } catch {
             storedKeys[provider] = nil
-            credentialStoreError = error.localizedDescription
-            credentialPersistenceAvailability = .sessionOnly
+            storeError = error.localizedDescription
+            persistenceAvailability = .sessionOnly
+        }
+    }
+
+    private func refreshCredentialSnapshot() {
+        let hasSessionKey = !(sessionKeys[provider] ?? "").isEmpty
+        let hasStoredKey = !(storedKeys[provider] ?? "").isEmpty
+        let snapshot = InferenceCredentialSnapshot(
+            provider: provider,
+            state: hasSessionKey ? .sessionOnly
+                : (hasStoredKey ? .stored : .missing),
+            hasStoredKey: hasStoredKey,
+            hasSessionKey: hasSessionKey,
+            persistenceAvailability: persistenceAvailability,
+            storeError: storeError
+        )
+        guard snapshot != credentialSnapshot else { return }
+        credentialSnapshot = snapshot
+    }
+
+    /// Explicitly loads the provider credential for flows that need to inspect
+    /// a non-selected provider. Ordinary body reads never call Keychain.
+    func prepareCredential(for provider: InferenceProviderKind) {
+        loadStoredKey(for: provider)
+        if provider == self.provider {
+            refreshCredentialSnapshot()
         }
     }
 }

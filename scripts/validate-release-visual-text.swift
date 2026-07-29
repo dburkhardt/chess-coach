@@ -117,10 +117,19 @@ private let navigationAnchors = [
 private func requirements(for scenario: String) throws -> [RequiredAnchor] {
     switch scenario {
     case "fresh-default-dark",
-         "fresh-compact-dark",
          "fresh-default-light",
          "installed-default-dark":
         return navigationAnchors + [
+            RequiredAnchor("Coach", region: .coach),
+            RequiredAnchor("Hint", region: .coach),
+            RequiredAnchor("Ask about this position", region: .coach),
+            RequiredAnchor("Moves", region: .fullWindow),
+            RequiredAnchor("Computer", region: .fullWindow),
+            RequiredAnchor("You", region: .fullWindow),
+        ]
+    case "fresh-compact-dark",
+         "sidebar-collapsed-default-dark":
+        return [
             RequiredAnchor("Coach", region: .coach),
             RequiredAnchor("Hint", region: .coach),
             RequiredAnchor("Ask about this position", region: .coach),
@@ -133,10 +142,10 @@ private func requirements(for scenario: String) throws -> [RequiredAnchor] {
             RequiredAnchor("Coach", region: .coach),
             RequiredAnchor("Hint", region: .coach),
             RequiredAnchor(
-                "No inference key configured",
+                "No LLM provider set up",
                 region: .coach
             ),
-            RequiredAnchor("Configure here", region: .coach),
+            RequiredAnchor("Set Up LLM Provider", region: .coach),
             RequiredAnchor("Moves", region: .fullWindow),
             RequiredAnchor("Computer", region: .fullWindow),
             RequiredAnchor("You", region: .fullWindow),
@@ -151,7 +160,15 @@ private func requirements(for scenario: String) throws -> [RequiredAnchor] {
     case "lesson-default-dark":
         return navigationAnchors + [
             RequiredAnchor("Coach", region: .coach),
+            RequiredAnchor("What to notice", region: .coach),
+            RequiredAnchor("Reveal Move", region: .coach),
+            RequiredAnchor("Done", region: .coach),
+        ]
+    case "lesson-clocked-default-dark":
+        return navigationAnchors + [
+            RequiredAnchor("Coach", region: .coach),
             RequiredAnchor("Teaching moment", region: .coach),
+            RequiredAnchor("Continue", region: .coach),
         ]
     case "completed-default-dark":
         return navigationAnchors + [

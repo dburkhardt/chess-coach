@@ -49,7 +49,33 @@ struct CoachHeaderPresentation: Equatable, Sendable {
     var style: CoachHeaderStyle
     var showsHistory: Bool
     var showsTakeBack: Bool
-    var showsSettings: Bool
+    var trailingAction: CoachHeaderActionPresentation?
+}
+
+enum CoachHeaderAction: Hashable, Sendable {
+    case continuePlaying
+}
+
+enum CoachHeaderActionStyle: Equatable, Sendable {
+    case neutral
+    case resume
+}
+
+struct CoachHeaderActionPresentation: Equatable, Sendable {
+    var action: CoachHeaderAction
+    var label: String
+    var systemImage: String?
+    var style: CoachHeaderActionStyle
+}
+
+enum CoachFooterPresentation: Equatable, Sendable {
+    case hidden
+    case composer(notice: String?)
+    case providerSetup(issue: InferenceConfigurationIssue)
+
+    var showsComposer: Bool {
+        if case .composer = self { true } else { false }
+    }
 }
 
 enum CoachCommandAction: Hashable, Sendable {
@@ -90,6 +116,7 @@ struct CoachInspectorSnapshot: Equatable, Sendable {
     var isEngineThinking: Bool
     var hasBlunderWarning: Bool
     var isHistoryPreviewActive: Bool
+    var usesClock: Bool
     var preparationState: CoachPreparationState
     var teachingMoment: TeachingMomentState?
     var canTakeBack: Bool
@@ -106,6 +133,7 @@ struct CoachInspectorSnapshot: Equatable, Sendable {
         isEngineThinking: Bool = false,
         hasBlunderWarning: Bool = false,
         isHistoryPreviewActive: Bool = false,
+        usesClock: Bool = false,
         preparationState: CoachPreparationState = .idle,
         teachingMoment: TeachingMomentState? = nil,
         canTakeBack: Bool = false,
@@ -121,6 +149,7 @@ struct CoachInspectorSnapshot: Equatable, Sendable {
         self.isEngineThinking = isEngineThinking
         self.hasBlunderWarning = hasBlunderWarning
         self.isHistoryPreviewActive = isHistoryPreviewActive
+        self.usesClock = usesClock
         self.preparationState = preparationState
         self.teachingMoment = teachingMoment
         self.canTakeBack = canTakeBack
@@ -136,9 +165,11 @@ struct CoachInspectorPresentation: Equatable, Sendable {
     var scene: CoachInspectorScene
     var header: CoachHeaderPresentation
     var commands: [CoachCommandPresentation]
-    var showsComposer: Bool
+    var footer: CoachFooterPresentation
     var currentPositionTurnCount: Int
     var earlierItemCount: Int
+
+    var showsComposer: Bool { footer.showsComposer }
 
     var primaryCommand: CoachCommandPresentation? {
         commands.first { $0.style == .primary }
@@ -159,7 +190,7 @@ struct CoachInspectorPresentationResolver {
             scene: scene,
             header: header(for: scene, snapshot: snapshot),
             commands: commands(for: scene, snapshot: snapshot),
-            showsComposer: showsComposer(for: scene, snapshot: snapshot),
+            footer: footer(for: scene, snapshot: snapshot),
             currentPositionTurnCount: snapshot.currentPositionTurnCount,
             earlierItemCount: snapshot.earlierItemCount
         )
@@ -198,7 +229,9 @@ struct CoachInspectorPresentationResolver {
             status = "Blunder Guard"
             style = .warning
         case .lesson:
-            status = "Teaching moment · paused"
+            status = snapshot.usesClock
+                ? "Teaching moment · paused"
+                : nil
             style = .teaching
         case .reviewing:
             status = "Reviewing earlier position"
@@ -216,7 +249,23 @@ struct CoachInspectorPresentationResolver {
                 scene != .empty &&
                 snapshot.earlierItemCount > 0,
             showsTakeBack: scene == .live && snapshot.canTakeBack,
-            showsSettings: scene != .neutral
+            trailingAction: lessonHeaderAction(
+                for: scene,
+                snapshot: snapshot
+            )
+        )
+    }
+
+    private func lessonHeaderAction(
+        for scene: CoachInspectorScene,
+        snapshot: CoachInspectorSnapshot
+    ) -> CoachHeaderActionPresentation? {
+        guard scene == .lesson else { return nil }
+        return CoachHeaderActionPresentation(
+            action: .continuePlaying,
+            label: snapshot.usesClock ? "Continue" : "Done",
+            systemImage: snapshot.usesClock ? "play.fill" : nil,
+            style: snapshot.usesClock ? .resume : .neutral
         )
     }
 
@@ -275,96 +324,25 @@ struct CoachInspectorPresentationResolver {
                 ),
             ]
         case .lesson:
-            guard let moment = snapshot.teachingMoment else { return [] }
-            switch moment.phase {
-            case .preparing, .failed:
-                return [
-                    command(
-                        .continuePlaying,
-                        "Continue Playing",
-                        systemImage: "play.fill",
-                        style: .primary
-                    ),
-                ]
-            case .concept:
-                return [
-                    command(
-                        .revealMove,
-                        "Reveal Move",
-                        systemImage: "arrow.right",
-                        style: .primary
-                    ),
-                    command(
-                        .continuePlaying,
-                        "Continue Playing",
-                        systemImage: "play.fill",
-                        style: .secondary
-                    ),
-                ]
-            case .revealed:
-                var result: [CoachCommandPresentation] = [
-                    command(
-                        .continuePlaying,
-                        "Continue Playing",
-                        systemImage: "play.fill",
-                        style: .primary
-                    ),
-                ]
-                if snapshot.hasPrincipalVariation {
-                    result.append(
-                        command(
-                            .exploreEngineLine(rank: 1),
-                            "Explore Engine Line",
-                            systemImage: "point.topleft.down.to.point.bottomright.curvepath",
-                            style: .secondary
-                        )
-                    )
-                }
-                return result
-            case .previewing(_, _, let step):
-                return [
-                    command(
-                        .continuePlaying,
-                        "Continue Playing",
-                        systemImage: "play.fill",
-                        style: .primary
-                    ),
-                    command(
-                        .previewPrevious,
-                        "Back",
-                        systemImage: "chevron.left",
-                        style: .quiet,
-                        isEnabled: step > 0
-                    ),
-                    command(
-                        .previewNext,
-                        "Next",
-                        systemImage: "chevron.right",
-                        style: .secondary,
-                        isEnabled:
-                            step < snapshot.principalVariationMoveCount
-                    ),
-                    command(
-                        .returnToPosition,
-                        "Return to Position",
-                        systemImage: "arrow.uturn.backward",
-                        style: .secondary
-                    ),
-                ]
-            }
+            return []
         }
     }
 
-    private func showsComposer(
+    private func footer(
         for scene: CoachInspectorScene,
         snapshot: CoachInspectorSnapshot
-    ) -> Bool {
-        guard snapshot.chatState.isCapable else { return false }
-        switch scene {
-        case .live, .lesson:
-            return true
-        case .neutral, .empty, .reviewing, .warning, .completed:
-            return false
+    ) -> CoachFooterPresentation {
+        guard scene == .live || scene == .lesson else {
+            return .hidden
+        }
+
+        switch snapshot.chatState {
+        case .unavailable(let issue):
+            return .providerSetup(issue: issue)
+        case .ready, .working:
+            return .composer(notice: nil)
+        case .failed(let message):
+            return .composer(notice: message)
         }
     }
 

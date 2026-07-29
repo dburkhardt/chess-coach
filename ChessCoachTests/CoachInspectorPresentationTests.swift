@@ -141,28 +141,42 @@ struct CoachInspectorPresentationTests {
         #expect(unavailable.header.status == nil)
     }
 
-    @Test func teachingCommandsStayFocusedByPhase() {
-        let concept = resolver.resolve(
-            snapshot(teachingMoment: teachingMoment())
+    @Test func teachingPresentationAdaptsToClockWithoutGlobalShelf() {
+        let unclocked = resolver.resolve(
+            snapshot(
+                usesClock: false,
+                teachingMoment: teachingMoment()
+            )
         )
-        #expect(concept.header.status == "Teaching moment · paused")
-        #expect(concept.primaryCommand?.action == .revealMove)
-        #expect(concept.commands.contains { $0.action == .continuePlaying })
+        #expect(unclocked.header.status == nil)
+        #expect(unclocked.header.trailingAction?.label == "Done")
+        #expect(
+            unclocked.header.trailingAction?.style == .neutral
+        )
+        #expect(unclocked.commands.isEmpty)
+
+        let clocked = resolver.resolve(
+            snapshot(
+                usesClock: true,
+                teachingMoment: teachingMoment()
+            )
+        )
+        #expect(clocked.header.status == "Teaching moment · paused")
+        #expect(clocked.header.trailingAction?.label == "Continue")
+        #expect(clocked.header.trailingAction?.style == .resume)
+        #expect(clocked.commands.isEmpty)
 
         var revealedMoment = teachingMoment()
         revealedMoment.phase = .revealed(hint())
         let revealed = resolver.resolve(
             snapshot(
+                usesClock: true,
                 teachingMoment: revealedMoment,
                 hasPrincipalVariation: true
             )
         )
-        #expect(revealed.primaryCommand?.action == .continuePlaying)
-        #expect(
-            revealed.commands.contains {
-                $0.action == .exploreEngineLine(rank: 1)
-            }
-        )
+        #expect(revealed.commands.isEmpty)
+        #expect(revealed.header.trailingAction?.label == "Continue")
 
         revealedMoment.phase = .previewing(
             hint(),
@@ -172,12 +186,63 @@ struct CoachInspectorPresentationTests {
         let preview = resolver.resolve(
             snapshot(teachingMoment: revealedMoment)
         )
-        #expect(preview.primaryCommand?.action == .continuePlaying)
-        #expect(
-            preview.commands.first { $0.action == .previewPrevious }?
-                .isEnabled == false
+        #expect(preview.commands.isEmpty)
+        #expect(preview.header.trailingAction?.label == "Done")
+    }
+
+    @Test func dialogueFooterNeverSilentlyDisappearsDuringLiveOrLesson() {
+        let liveReady = resolver.resolve(
+            snapshot(chatState: .ready)
         )
-        #expect(preview.commands.contains { $0.action == .returnToPosition })
+        #expect(liveReady.footer == .composer(notice: nil))
+        #expect(liveReady.showsComposer)
+
+        let lessonWorking = resolver.resolve(
+            snapshot(
+                teachingMoment: teachingMoment(),
+                chatState: .working
+            )
+        )
+        #expect(lessonWorking.footer == .composer(notice: nil))
+        #expect(lessonWorking.showsComposer)
+
+        let failed = resolver.resolve(
+            snapshot(
+                chatState: .failed(message: "Connection interrupted.")
+            )
+        )
+        #expect(
+            failed.footer ==
+                .composer(notice: "Connection interrupted.")
+        )
+        #expect(failed.showsComposer)
+
+        let missing = resolver.resolve(
+            snapshot(
+                teachingMoment: teachingMoment(),
+                chatState: .unavailable(issue: .missingKey)
+            )
+        )
+        #expect(
+            missing.footer == .providerSetup(issue: .missingKey)
+        )
+        #expect(!missing.showsComposer)
+
+        let warning = resolver.resolve(
+            snapshot(
+                hasBlunderWarning: true,
+                chatState: .ready
+            )
+        )
+        #expect(warning.footer == .hidden)
+
+        let completed = resolver.resolve(
+            snapshot(
+                gameResult: .draw,
+                chatState: .ready
+            )
+        )
+        #expect(completed.footer == .hidden)
     }
 
     @Test func projectionGroupsTurnsAndSeparatesSameFENAtDifferentPly() {
@@ -414,6 +479,7 @@ struct CoachInspectorPresentationTests {
         isEngineThinking: Bool = false,
         hasBlunderWarning: Bool = false,
         isHistoryPreviewActive: Bool = false,
+        usesClock: Bool = false,
         preparationState: CoachPreparationState = .idle,
         teachingMoment: TeachingMomentState? = nil,
         canTakeBack: Bool = false,
@@ -428,6 +494,7 @@ struct CoachInspectorPresentationTests {
             isEngineThinking: isEngineThinking,
             hasBlunderWarning: hasBlunderWarning,
             isHistoryPreviewActive: isHistoryPreviewActive,
+            usesClock: usesClock,
             preparationState: preparationState,
             teachingMoment: teachingMoment,
             canTakeBack: canTakeBack,

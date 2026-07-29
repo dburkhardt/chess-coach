@@ -9,20 +9,26 @@ struct GamesView: View {
     @State private var selectedGame: SavedGame?
 
     var body: some View {
-        NavigationSplitView {
+        HSplitView {
             List(games, selection: $selectedGame) { game in
                 VStack(alignment: .leading, spacing: 4) {
                     Text(game.title)
                         .font(.headline)
-                    Text(game.startedAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Text(
+                        game.startedAt.formatted(
+                            date: .abbreviated,
+                            time: .shortened
+                        )
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                     Text(game.resultLabel)
                         .font(.caption)
                 }
                 .tag(game)
             }
-            .navigationTitle("Games")
+            .listStyle(.inset)
+            .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
             .overlay {
                 if games.isEmpty {
                     ContentUnavailableView(
@@ -32,13 +38,16 @@ struct GamesView: View {
                     )
                 }
             }
-        } detail: {
+
             if let selectedGame {
                 GameReviewView(game: selectedGame)
+                    .frame(minWidth: 420)
             } else {
                 ContentUnavailableView("Select a game", systemImage: "checkerboard.rectangle")
+                    .frame(minWidth: 420)
             }
         }
+        .navigationTitle("Games")
         .onAppear {
             if selectedGame == nil {
                 selectedGame = games.first

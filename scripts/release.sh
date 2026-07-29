@@ -7,8 +7,8 @@ DIST_DIR="${REPO_DIR}/dist"
 ARCHIVE_PATH="${DIST_DIR}/ChessCoach.xcarchive"
 STAGING_PATH="${DIST_DIR}/dmg-root"
 VERSION="0.1.0"
-PRERELEASE="beta.8"
-BUILD_NUMBER="8"
+PRERELEASE="beta.9"
+BUILD_NUMBER="9"
 DMG_PATH="${DIST_DIR}/Chess-Coach-${VERSION}-${PRERELEASE}.dmg"
 CHECKSUM_PATH="${DMG_PATH}.sha256"
 PROVISIONAL_DMG_PATH="${DIST_DIR}/.Chess-Coach-${VERSION}-${PRERELEASE}.provisional.dmg"
@@ -23,7 +23,7 @@ Usage:
   ./scripts/release.sh publish
 
 prepare builds, tests, explicitly signs, and captures the exact release
-candidate in seven whole-window visual-QA states. It never creates, notarizes,
+candidate in every required whole-window visual-QA state. It never creates, notarizes,
 installs, or launches a DMG.
 
 publish requires an interactive approval tied to the current Git commit, visual
