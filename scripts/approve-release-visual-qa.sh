@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/visual-qa-lib.sh"
+source "${SCRIPT_DIR}/release-artifact-lib.sh"
 
 APP_PATH=""
 EVIDENCE_DIR=""
@@ -52,6 +53,11 @@ done
 APP_PATH=${APP_PATH:A}
 [[ -n "${EVIDENCE_DIR}" ]] || EVIDENCE_DIR=$(visual_qa_evidence_dir "${APP_PATH}")
 EVIDENCE_DIR=${EVIDENCE_DIR:A}
+CANDIDATE_RECEIPT=$(release_artifact_receipt_for_app "${APP_PATH}")
+release_artifact_verify_candidate \
+  "${CANDIDATE_RECEIPT}" \
+  "${APP_PATH}" \
+  captured
 
 "${SCRIPT_DIR}/verify-release-visual-qa.sh" \
   --app "${APP_PATH}" \
@@ -102,6 +108,18 @@ trap - EXIT
   --app "${APP_PATH}" \
   --evidence "${EVIDENCE_DIR}"
 
+APPROVAL="${EVIDENCE_DIR}/approval.tsv"
+EVIDENCE_RELATIVE=${EVIDENCE_DIR#"${VISUAL_QA_REPO_DIR}/dist/"}
+release_artifact_transition \
+  "${CANDIDATE_RECEIPT}" \
+  captured \
+  candidate-approved \
+  visualEvidenceRelativePath "${EVIDENCE_RELATIVE}" \
+  visualManifestSHA256 "$(release_artifact_sha256 "${MANIFEST}")" \
+  candidateApprovalSHA256 "$(release_artifact_sha256 "${APPROVAL}")"
+
 print
-print "Approved. Publish this exact candidate with:"
+print "Candidate visual approval recorded."
+print "Lifecycle stage: candidate-approved (not installed, ready, or published)."
+print "Publish this exact candidate with:"
 print "  ./scripts/release.sh publish"

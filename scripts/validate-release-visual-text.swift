@@ -118,6 +118,11 @@ private func requirements(for scenario: String) throws -> [RequiredAnchor] {
     switch scenario {
     case "fresh-default-dark",
          "fresh-default-light",
+         "sidebar-restored-expanded-default-light",
+         "sidebar-minimum-width-default-light",
+         "sidebar-maximum-width-default-light",
+         "sidebar-inactive-selection-default-light",
+         "sidebar-inactive-selection-default-dark",
          "installed-default-dark":
         return navigationAnchors + [
             RequiredAnchor("Coach", region: .coach),
@@ -137,15 +142,18 @@ private func requirements(for scenario: String) throws -> [RequiredAnchor] {
             RequiredAnchor("Computer", region: .fullWindow),
             RequiredAnchor("You", region: .fullWindow),
         ]
-    case "missing-inference-key-default-light":
+    case "missing-inference-key-default-light",
+         "missing-inference-key-minimum-inspector-light",
+         "missing-inference-key-minimum-inspector-large-text-light",
+         "missing-inference-key-maximum-inspector-light":
         return navigationAnchors + [
             RequiredAnchor("Coach", region: .coach),
             RequiredAnchor("Hint", region: .coach),
             RequiredAnchor(
-                "No LLM provider set up",
+                "No inference key configured",
                 region: .coach
             ),
-            RequiredAnchor("Set Up LLM Provider", region: .coach),
+            RequiredAnchor("Configure here", region: .coach),
             RequiredAnchor("Moves", region: .fullWindow),
             RequiredAnchor("Computer", region: .fullWindow),
             RequiredAnchor("You", region: .fullWindow),

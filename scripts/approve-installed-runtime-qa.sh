@@ -325,7 +325,7 @@ print "Prompt-free runtime gate"
 print "------------------------"
 print "The exact installed app is running normally."
 print
-print "Beta 9 uses a provider-neutral Keychain service and never migrates"
+print "Chess Coach uses a provider-neutral Keychain service and never migrates"
 print "legacy credentials, so no Chess Coach Keychain or login-password prompt"
 print "should appear. If one did, cancel"
 print "this release and investigate; do not enter a password."

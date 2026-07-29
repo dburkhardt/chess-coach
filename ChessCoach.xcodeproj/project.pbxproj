@@ -25,11 +25,13 @@
 		3030DD918929ED2930A30BD0 /* ServiceInterfaces.swift in Sources */ = {isa = PBXBuildFile; fileRef = 650B47A051EF54F1392BE157 /* ServiceInterfaces.swift */; };
 		39C6800CEE6627131524E465 /* ChessBoardVisualTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F99AF676BD2C795A85035B2 /* ChessBoardVisualTests.swift */; };
 		407881E23022C8CF40EE9034 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4062432FDE7A89CA6564336 /* AppModel.swift */; };
+		43AA93A1178BB79883674B02 /* ReleaseVisualQALayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A78F175005EA9C020C32F09 /* ReleaseVisualQALayoutTests.swift */; };
 		45612650BE59B35EA0E48D44 /* GameOverPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1FF6E8C5AF5CBF51C80AC6B /* GameOverPanel.swift */; };
 		470F90F88ADBE84075D680FA /* AppNavigationSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = 36F468939F8DBCC43811414F /* AppNavigationSidebar.swift */; };
 		4955DFFAD4C4806042C9E8CF /* UCIParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD90C9ECAC61125D2ADD982B /* UCIParser.swift */; };
 		4983A4853CAA17B2EA164E80 /* AppNavigationSidebarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55152E19123B8AD085158DB6 /* AppNavigationSidebarTests.swift */; };
 		4E0C2D6D8FFAF7332528B25F /* ReleaseVisualQA.swift in Sources */ = {isa = PBXBuildFile; fileRef = D50A247A6A0F75E6F8D1AC2A /* ReleaseVisualQA.swift */; };
+		5194C67367A28B7D8340F24B /* ReleaseCandidatePreviewBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CECA9A8CE86ABA84EB47060 /* ReleaseCandidatePreviewBanner.swift */; };
 		52D6C103228BC322728622FB /* ChessKit in Frameworks */ = {isa = PBXBuildFile; productRef = FED593FE2E9ECFF59C700309 /* ChessKit */; };
 		57FF9BAE329B176220FB693C /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31AEB3E96D73D1E4E95FFC1C /* Models.swift */; };
 		5ECE464ECEF5DB53F0744954 /* NewGameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A95C971C8195313F76B998D /* NewGameView.swift */; };
@@ -44,12 +46,15 @@
 		777F844246F3FF19BFC54165 /* ChessCoachUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 862299E390CBF3DC9DDBA189 /* ChessCoachUITests.swift */; };
 		79FB3F3CD9C1436A4E747446 /* ChessGameState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D5AF2869075BFDCF108EE /* ChessGameState.swift */; };
 		7C5F3E90474FE57D440D1651 /* ChessBoardTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4F1C06064CBD06320FE82F18 /* ChessBoardTypes.swift */; };
+		7DEB24E3F0107244B494650F /* beta9-truncated-navigation.png in Resources */ = {isa = PBXBuildFile; fileRef = FEA7E0633AA7F0DD1AFE7E88 /* beta9-truncated-navigation.png */; };
 		92FB93D7EE0E0E5583E08E68 /* CoachInspectorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61B31203D1AA25465819543A /* CoachInspectorPresentation.swift */; };
 		979169611B95DB16FEAA9656 /* CoachContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 253892A4D9C98481FA8FE7A2 /* CoachContentView.swift */; };
 		9ACCFFA9944AA851B5C9959E /* ChessGameStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BFDCB1CBC68FE85C2D2AD1A8 /* ChessGameStateTests.swift */; };
 		9CAAF9F13B9307C0B521FB09 /* UCIParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4E922A272A5BDCAEB634AE7 /* UCIParserTests.swift */; };
+		AB9CFDBCDC14143C22178F68 /* ReleaseLaunchMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B28D26728EE4B14265E1440 /* ReleaseLaunchMode.swift */; };
 		B3718E3FFA96289C8B444108 /* ChessBoardPreferences.swift in Sources */ = {isa = PBXBuildFile; fileRef = 596DBECEA86BFF95C1FF7726 /* ChessBoardPreferences.swift */; };
 		B57BC52796B3039E6829DB8D /* BlunderDetectorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14AE1DFC7C72E21231F176E /* BlunderDetectorTests.swift */; };
+		B8D70B0E3B5DDC01D8EB0250 /* ReleaseLaunchModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 595FC4A6212BF3A704C9BE92 /* ReleaseLaunchModeTests.swift */; };
 		BA137B7724151BDA070239E0 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9BF6A49BB150B695E1BADF3 /* OnboardingView.swift */; };
 		BAECC446CBD36153CC99128A /* ChessBoardPresentationContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACD915257128E3D2647416CF /* ChessBoardPresentationContext.swift */; };
 		C33FA3E0A06B62F555739642 /* Engines in Resources */ = {isa = PBXBuildFile; fileRef = D75121D3E372DEE539530A03 /* Engines */; };
@@ -88,6 +93,7 @@
 /* Begin PBXFileReference section */
 		05A03CE1CFCC1D143CD6DB5C /* CoachContextBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachContextBuilder.swift; sourceTree = "<group>"; };
 		0BE47C283306010AD3714926 /* ChessCoachTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ChessCoachTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		0CECA9A8CE86ABA84EB47060 /* ReleaseCandidatePreviewBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseCandidatePreviewBanner.swift; sourceTree = "<group>"; };
 		0E83D9836E8E37613853FB2A /* GameOverPanelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameOverPanelTests.swift; sourceTree = "<group>"; };
 		0F9D5AF2869075BFDCF108EE /* ChessGameState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChessGameState.swift; sourceTree = "<group>"; };
 		253892A4D9C98481FA8FE7A2 /* CoachContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoachContentView.swift; sourceTree = "<group>"; };
@@ -100,8 +106,10 @@
 		3A39B17C19E09E33A7E27276 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		3B48861941161F981027DE30 /* StockfishService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockfishService.swift; sourceTree = "<group>"; };
 		4179125235ADD07C7C78E787 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		4B28D26728EE4B14265E1440 /* ReleaseLaunchMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseLaunchMode.swift; sourceTree = "<group>"; };
 		4F1C06064CBD06320FE82F18 /* ChessBoardTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChessBoardTypes.swift; sourceTree = "<group>"; };
 		55152E19123B8AD085158DB6 /* AppNavigationSidebarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppNavigationSidebarTests.swift; sourceTree = "<group>"; };
+		595FC4A6212BF3A704C9BE92 /* ReleaseLaunchModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseLaunchModeTests.swift; sourceTree = "<group>"; };
 		596DBECEA86BFF95C1FF7726 /* ChessBoardPreferences.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChessBoardPreferences.swift; sourceTree = "<group>"; };
 		5A9AE15E1BA3A698E6C1E81C /* PersistenceProfileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceProfileTests.swift; sourceTree = "<group>"; };
 		5DD201602E3B46616BE8BFBE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
@@ -111,6 +119,7 @@
 		69F258A9505F5789F2B9ACBD /* ReviewAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReviewAnalyzer.swift; sourceTree = "<group>"; };
 		6C7AFD5A6CBBC97C3B23992E /* ModelInferenceClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInferenceClientTests.swift; sourceTree = "<group>"; };
 		6EBB4BD92DFCD0ED92ABEDCA /* ModelInferenceClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelInferenceClient.swift; sourceTree = "<group>"; };
+		7A78F175005EA9C020C32F09 /* ReleaseVisualQALayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReleaseVisualQALayoutTests.swift; sourceTree = "<group>"; };
 		7B75F11CA93A0EBC6D961F9C /* StockfishServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StockfishServiceTests.swift; sourceTree = "<group>"; };
 		7E62FC5DC403D759F375B746 /* LearnerProgressView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnerProgressView.swift; sourceTree = "<group>"; };
 		8035C01C912CDFFC81943AF7 /* InstalledCredentialRuntimeProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstalledCredentialRuntimeProbeTests.swift; sourceTree = "<group>"; };
@@ -150,6 +159,7 @@
 		EF75976F8D12384F110A41FB /* GameCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameCoordinator.swift; sourceTree = "<group>"; };
 		F14AE1DFC7C72E21231F176E /* BlunderDetectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlunderDetectorTests.swift; sourceTree = "<group>"; };
 		F601B8266424D1E4D4ED73BB /* PersistenceController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersistenceController.swift; sourceTree = "<group>"; };
+		FEA7E0633AA7F0DD1AFE7E88 /* beta9-truncated-navigation.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "beta9-truncated-navigation.png"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -202,6 +212,14 @@
 			path = ChessCoachUITests;
 			sourceTree = "<group>";
 		};
+		67B0BDE1F9C5B5FC20F7A1EE /* Fixtures */ = {
+			isa = PBXGroup;
+			children = (
+				FEA7E0633AA7F0DD1AFE7E88 /* beta9-truncated-navigation.png */,
+			);
+			path = Fixtures;
+			sourceTree = "<group>";
+		};
 		6E7474618A04CBC667BDA48D /* Coaching */ = {
 			isa = PBXGroup;
 			children = (
@@ -229,6 +247,7 @@
 				7E62FC5DC403D759F375B746 /* LearnerProgressView.swift */,
 				2A95C971C8195313F76B998D /* NewGameView.swift */,
 				C9BF6A49BB150B695E1BADF3 /* OnboardingView.swift */,
+				0CECA9A8CE86ABA84EB47060 /* ReleaseCandidatePreviewBanner.swift */,
 				B3B26FD85C282E5FCFDB9A3C /* RootView.swift */,
 				5DD201602E3B46616BE8BFBE /* SettingsView.swift */,
 				989A93B2C4215B8D5AF7307E /* ThirdPartyNoticesView.swift */,
@@ -260,8 +279,11 @@
 				8035C01C912CDFFC81943AF7 /* InstalledCredentialRuntimeProbeTests.swift */,
 				6C7AFD5A6CBBC97C3B23992E /* ModelInferenceClientTests.swift */,
 				5A9AE15E1BA3A698E6C1E81C /* PersistenceProfileTests.swift */,
+				595FC4A6212BF3A704C9BE92 /* ReleaseLaunchModeTests.swift */,
+				7A78F175005EA9C020C32F09 /* ReleaseVisualQALayoutTests.swift */,
 				7B75F11CA93A0EBC6D961F9C /* StockfishServiceTests.swift */,
 				B4E922A272A5BDCAEB634AE7 /* UCIParserTests.swift */,
+				67B0BDE1F9C5B5FC20F7A1EE /* Fixtures */,
 			);
 			path = ChessCoachTests;
 			sourceTree = "<group>";
@@ -272,6 +294,7 @@
 				B4062432FDE7A89CA6564336 /* AppModel.swift */,
 				C02CC47001BB8CA0952CF358 /* ChessCoachApp.swift */,
 				BE93926874C9EA9B76C0FDBA /* InstalledCredentialRuntimeProbe.swift */,
+				4B28D26728EE4B14265E1440 /* ReleaseLaunchMode.swift */,
 				D50A247A6A0F75E6F8D1AC2A /* ReleaseVisualQA.swift */,
 			);
 			path = App;
@@ -364,6 +387,7 @@
 			buildConfigurationList = 8CD494B2DAB0A591B1D3D6FB /* Build configuration list for PBXNativeTarget "ChessCoachTests" */;
 			buildPhases = (
 				30B04E21FE9D8C436203033C /* Sources */,
+				52D8F2A48C900E6D8CF4CD8C /* Resources */,
 			);
 			buildRules = (
 			);
@@ -449,6 +473,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		52D8F2A48C900E6D8CF4CD8C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7DEB24E3F0107244B494650F /* beta9-truncated-navigation.png in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -467,6 +499,8 @@
 				1EA2816740EBB3DA27F6F94E /* InstalledCredentialRuntimeProbeTests.swift in Sources */,
 				EDE8C65791067B1F8FD1459F /* ModelInferenceClientTests.swift in Sources */,
 				E2BD65E6D41E951E39C9BE9C /* PersistenceProfileTests.swift in Sources */,
+				B8D70B0E3B5DDC01D8EB0250 /* ReleaseLaunchModeTests.swift in Sources */,
+				43AA93A1178BB79883674B02 /* ReleaseVisualQALayoutTests.swift in Sources */,
 				2536FE426B59C3C2F21D6E35 /* StockfishServiceTests.swift in Sources */,
 				9CAAF9F13B9307C0B521FB09 /* UCIParserTests.swift in Sources */,
 			);
@@ -517,6 +551,8 @@
 				5ECE464ECEF5DB53F0744954 /* NewGameView.swift in Sources */,
 				BA137B7724151BDA070239E0 /* OnboardingView.swift in Sources */,
 				D0CEC276F630BAAB00C5D24D /* PersistenceController.swift in Sources */,
+				5194C67367A28B7D8340F24B /* ReleaseCandidatePreviewBanner.swift in Sources */,
+				AB9CFDBCDC14143C22178F68 /* ReleaseLaunchMode.swift in Sources */,
 				4E0C2D6D8FFAF7332528B25F /* ReleaseVisualQA.swift in Sources */,
 				1AA12377B35CEAF4350788CE /* ReviewAnalyzer.swift in Sources */,
 				0CED486E3440A4387B0C4292 /* RootView.swift in Sources */,
@@ -618,7 +654,7 @@
 				CODE_SIGN_ENTITLEMENTS = ChessCoach/ChessCoach.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ChessCoach/Info.plist;
@@ -642,7 +678,7 @@
 				CODE_SIGN_ENTITLEMENTS = ChessCoach/ChessCoach.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 9;
+				CURRENT_PROJECT_VERSION = 10;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = ChessCoach/Info.plist;

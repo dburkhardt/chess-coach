@@ -297,10 +297,10 @@ struct PersistenceProfileTests {
         )
 
         #expect(project.contains("MARKETING_VERSION: \"0.1.0\""))
-        #expect(project.contains("CURRENT_PROJECT_VERSION: \"9\""))
+        #expect(project.contains("CURRENT_PROJECT_VERSION: \"10\""))
         #expect(!project.contains("DEVELOPMENT_TEAM:"))
         #expect(release.contains("Chess-Coach-${VERSION}-${PRERELEASE}.dmg"))
-        #expect(release.contains("PRERELEASE=\"beta.9\""))
+        #expect(release.contains("PRERELEASE=\"beta.10\""))
         #expect(release.contains("DEVELOPER_ID_APPLICATION:?"))
         #expect(release.contains("DEVELOPMENT_TEAM:?"))
         #expect(release.contains("NOTARYTOOL_PROFILE:?"))
