@@ -114,7 +114,11 @@ release_artifact_place_archive() {
 
   # The executable hash is the final directory component, so the candidate
   # directory itself must exist before placing the archive inside it.
-  mkdir -p "${candidate_dir}" || {
+  mkdir -p "${candidate_dir:h}" || {
+    release_artifact_die "Could not create candidate parent directory: ${candidate_dir:h}"
+    return 1
+  }
+  mkdir "${candidate_dir}" || {
     release_artifact_die "Could not create candidate directory: ${candidate_dir}"
     return 1
   }
