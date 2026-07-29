@@ -242,11 +242,7 @@ struct CoachProviderSetupFooter: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 8) {
-                providerStatus
-                Spacer(minLength: 4)
-                setupButton
-            }
+            horizontalContent
 
             VStack(alignment: .leading, spacing: 5) {
                 providerStatus
@@ -260,26 +256,45 @@ struct CoachProviderSetupFooter: View {
         .fixedSize(horizontal: false, vertical: true)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            "No LLM provider set up. Set Up LLM Provider"
+            CoachProviderSetupFooterContent.accessibilityLabel
         )
         .accessibilityIdentifier("coach-provider-setup")
     }
 
+    private var horizontalContent: some View {
+        HStack(alignment: .center, spacing: 8) {
+            providerStatus
+                .fixedSize(horizontal: true, vertical: true)
+            setupButton
+                .fixedSize(horizontal: true, vertical: true)
+        }
+        // Preserve the children's true intrinsic width. This lets
+        // `ViewThatFits` select the vertical layout instead of accepting a
+        // compressed HStack whose trailing button is clipped.
+        .fixedSize(horizontal: true, vertical: true)
+    }
+
     private var providerStatus: some View {
         Label(
-            "No LLM provider set up.",
+            CoachProviderSetupFooterContent.status,
             systemImage: "exclamationmark.circle"
         )
         .foregroundStyle(.secondary)
     }
 
     private var setupButton: some View {
-        Button("Set Up LLM Provider") {
+        Button(CoachProviderSetupFooterContent.action) {
             onConfigure(issue)
         }
-            .buttonStyle(.link)
-            .accessibilityIdentifier("configure-inference")
+        .buttonStyle(.link)
+        .accessibilityIdentifier("configure-inference")
     }
+}
+
+enum CoachProviderSetupFooterContent {
+    static let status = "No inference key configured."
+    static let action = "Configure here"
+    static let accessibilityLabel = "\(status) \(action)"
 }
 
 struct HistoryReviewWorkspace: View {

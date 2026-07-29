@@ -6,16 +6,17 @@ source "${SCRIPT_DIR}/visual-qa-lib.sh"
 
 APP_PATH=""
 REPLACE=0
-CAPTURE_TIMEOUT_SECONDS=45
+CAPTURE_TIMEOUT_SECONDS=600
 INSTALLED_APP_PATH="/Applications/Chess Coach.app"
 
 usage() {
   cat <<'EOF'
 Usage: ./scripts/capture-release-visual-qa.sh --app /path/to/ChessCoach.app [--replace]
 
-Runs the signed release candidate's in-app --visual-qa harness for every
-required whole-window scenario, then creates a source-bound manifest and
-contact sheet under dist/visual-qa.
+Runs the signed release candidate's in-app --visual-qa harness once for the
+complete required whole-window scenario sequence, then creates a source-bound
+manifest and contact sheet under dist/visual-qa. Keep the candidate foreground;
+at most one click should be required at the beginning of the session.
 EOF
 }
 
@@ -65,6 +66,9 @@ CAPTURE_DIR="${TEMP_DIR}/captures"
 PROFILE_DIR="${TEMP_DIR}/profiles"
 LOG_DIR="${TEMP_DIR}/logs"
 mkdir -p "${CAPTURE_DIR}" "${PROFILE_DIR}" "${LOG_DIR}"
+CAPTURE_SESSION_ID=""
+CAPTURE_OPEN_PID=""
+CAPTURE_ACTIVATION_PID=""
 
 installed_app_pids() {
   pgrep -f '^/Applications/Chess Coach\.app/Contents/MacOS/ChessCoach($| )' || true
@@ -81,8 +85,56 @@ wait_for_installed_app_to_stop() {
   done
 }
 
+candidate_session_pids() {
+  [[ -n "${CAPTURE_SESSION_ID}" ]] || return 0
+  ps -axo pid=,command= | awk \
+    -v executable="${APP_EXECUTABLE}" \
+    -v marker="--visual-qa-session-id=${CAPTURE_SESSION_ID}" '
+      {
+        pid = $1
+        sub(/^[[:space:]]*[0-9]+[[:space:]]+/, "", $0)
+        if (($0 == executable || index($0, executable " ") == 1) &&
+            index($0, marker) > 0) {
+          print pid
+        }
+      }
+    '
+}
+
+stop_candidate_session() {
+  local pids
+  pids=$(candidate_session_pids)
+  [[ -n "${pids}" ]] || return 0
+
+  print -u2 "Stopping the exact failed visual-QA candidate session."
+  local pid
+  for pid in ${(f)pids}; do
+    kill -TERM "${pid}" >/dev/null 2>&1 || true
+  done
+
+  local elapsed=0
+  while [[ -n "$(candidate_session_pids)" && ${elapsed} -lt 5 ]]; do
+    sleep 1
+    (( elapsed += 1 ))
+  done
+
+  pids=$(candidate_session_pids)
+  for pid in ${(f)pids}; do
+    kill -KILL "${pid}" >/dev/null 2>&1 || true
+  done
+}
+
 cleanup() {
   local original_exit_code=${1:-0}
+  if [[ -n "${CAPTURE_ACTIVATION_PID}" ]]; then
+    kill "${CAPTURE_ACTIVATION_PID}" >/dev/null 2>&1 || true
+    wait "${CAPTURE_ACTIVATION_PID}" >/dev/null 2>&1 || true
+  fi
+  if [[ -n "${CAPTURE_OPEN_PID}" ]]; then
+    kill "${CAPTURE_OPEN_PID}" >/dev/null 2>&1 || true
+    wait "${CAPTURE_OPEN_PID}" >/dev/null 2>&1 || true
+  fi
+  stop_candidate_session
   [[ -d "${TEMP_DIR}" ]] && rm -rf "${TEMP_DIR}"
   trap - EXIT
   exit "${original_exit_code}"
@@ -109,12 +161,14 @@ if [[ -e "${EVIDENCE_DIR}" ]]; then
   esac
 fi
 
-run_scenario() {
-  local scenario=$1
-  local stdout_path="${LOG_DIR}/${scenario}.stdout.log"
-  local stderr_path="${LOG_DIR}/${scenario}.stderr.log"
+run_capture_session() {
+  local scenario_sequence=$1
+  local stdout_path="${LOG_DIR}/visual-qa-session.stdout.log"
+  local stderr_path="${LOG_DIR}/visual-qa-session.stderr.log"
+  CAPTURE_SESSION_ID=$(uuidgen)
 
-  print "Capturing ${scenario}. Keep Chess Coach frontmost; click its window if macOS does not activate it."
+  print "Starting one visual-QA session for all scenarios."
+  print "Keep Chess Coach frontmost; click its window once if macOS does not activate it."
 
   # Launch through LaunchServices so a normal, unlocked interactive release
   # session can make this exact candidate frontmost. Directly executing an app
@@ -124,13 +178,15 @@ run_scenario() {
   open -F -n -W \
     -o "${stdout_path}" \
     --stderr "${stderr_path}" \
-    --env "LLVM_PROFILE_FILE=${PROFILE_DIR}/${scenario}-%p.profraw" \
+    --env "LLVM_PROFILE_FILE=${PROFILE_DIR}/visual-qa-session-%p.profraw" \
     "${APP_PATH}" \
     --args \
     --visual-qa \
+    "--visual-qa-session-id=${CAPTURE_SESSION_ID}" \
     "--output-directory=${CAPTURE_DIR}" \
-    "--scenario=${scenario}" &
+    "--scenario-sequence=${scenario_sequence}" &
   local process_id=$!
+  CAPTURE_OPEN_PID=${process_id}
   # LaunchServices occasionally creates the requested foreground process
   # without actually making its window active when this script is run from an
   # automation host. Re-opening this exact bundle (without `-n`) activates the
@@ -144,18 +200,22 @@ run_scenario() {
     done
   ) &
   local activation_id=$!
+  CAPTURE_ACTIVATION_PID=${activation_id}
   local elapsed=0
 
   while kill -0 "${process_id}" >/dev/null 2>&1; do
     if (( elapsed >= CAPTURE_TIMEOUT_SECONDS )); then
       kill "${activation_id}" >/dev/null 2>&1 || true
       wait "${activation_id}" >/dev/null 2>&1 || true
+      CAPTURE_ACTIVATION_PID=""
+      stop_candidate_session
       kill "${process_id}" >/dev/null 2>&1 || true
       wait "${process_id}" >/dev/null 2>&1 || true
-      print -u2 "Capture output (${scenario}):"
+      CAPTURE_OPEN_PID=""
+      print -u2 "Visual-QA session output:"
       tail -80 "${stdout_path}" >&2 || true
       tail -80 "${stderr_path}" >&2 || true
-      visual_qa_die "Scenario ${scenario} did not finish within ${CAPTURE_TIMEOUT_SECONDS} seconds."
+      visual_qa_die "The visual-QA session did not finish within ${CAPTURE_TIMEOUT_SECONDS} seconds."
     fi
     sleep 1
     (( elapsed += 1 ))
@@ -163,21 +223,18 @@ run_scenario() {
 
   kill "${activation_id}" >/dev/null 2>&1 || true
   wait "${activation_id}" >/dev/null 2>&1 || true
+  CAPTURE_ACTIVATION_PID=""
   if ! wait "${process_id}"; then
-    print -u2 "Capture output (${scenario}):"
-    tail -80 "${stdout_path}" >&2 || true
-    tail -80 "${stderr_path}" >&2 || true
-    visual_qa_die "Scenario ${scenario} failed."
-  fi
-
-  if [[ ! -f "${CAPTURE_DIR}/${scenario}.png" ||
-        ! -f "${CAPTURE_DIR}/${scenario}.json" ]]; then
-    print -u2 "Capture output (${scenario}):"
+    CAPTURE_OPEN_PID=""
+    stop_candidate_session
+    print -u2 "Visual-QA session output:"
     tail -80 "${stdout_path}" >&2 || true
     tail -80 "${stderr_path}" >&2 || true
     visual_qa_die \
-      "Scenario ${scenario} did not produce exact visual evidence. Run Prepare from an unlocked interactive GUI session and keep Chess Coach frontmost."
+      "The visual-QA session failed. Run Prepare from an unlocked interactive GUI session and keep Chess Coach frontmost."
   fi
+  CAPTURE_OPEN_PID=""
+  stop_candidate_session
 }
 
 APP_BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "${APP_INFO}")
@@ -186,15 +243,21 @@ APP_BUILD=$(plutil -extract CFBundleVersion raw -o - "${APP_INFO}")
 typeset -a SCENARIOS
 SCENARIOS=("${(@f)$(visual_qa_scenarios)}")
 (( ${#SCENARIOS[@]} > 0 )) || visual_qa_die "The visual-QA scenario list is empty."
+SCENARIO_SEQUENCE="${(j:,:)SCENARIOS}"
+
+run_capture_session "${SCENARIO_SEQUENCE}"
 
 for scenario in "${SCENARIOS[@]}"; do
-  print "Capturing whole-window scenario: ${scenario}"
-  run_scenario "${scenario}"
-
+  print "Validating whole-window scenario: ${scenario}"
   png="${CAPTURE_DIR}/${scenario}.png"
   sidecar="${CAPTURE_DIR}/${scenario}.json"
-  [[ -f "${png}" ]] || visual_qa_die "Scenario ${scenario} did not create ${scenario}.png."
-  [[ -f "${sidecar}" ]] || visual_qa_die "Scenario ${scenario} did not create ${scenario}.json."
+  if [[ ! -f "${png}" || ! -f "${sidecar}" ]]; then
+    print -u2 "Visual-QA session output:"
+    tail -80 "${LOG_DIR}/visual-qa-session.stdout.log" >&2 || true
+    tail -80 "${LOG_DIR}/visual-qa-session.stderr.log" >&2 || true
+    visual_qa_die \
+      "Scenario ${scenario} did not produce its PNG and JSON sidecar."
+  fi
   # `plutil -lint` rejects JSON input on current macOS even though its read
   # and conversion paths accept the same valid document. Parse the document
   # instead so malformed JSON still fails without a false negative.
@@ -224,6 +287,10 @@ for scenario in "${SCENARIOS[@]}"; do
     visual_qa_die "${scenario}.json has the wrong pixel width."
   [[ "$(visual_qa_sidecar_value "${sidecar}" pixelHeight)" == "${height}" ]] ||
     visual_qa_die "${scenario}.json has the wrong pixel height."
+  [[ "$(visual_qa_sidecar_value "${sidecar}" layout.validation)" == "passed" ]] ||
+    visual_qa_die "${scenario}.json did not pass in-app layout containment validation."
+  [[ -n "$(visual_qa_sidecar_value "${sidecar}" layout.probes.0.name)" ]] ||
+    visual_qa_die "${scenario}.json contains no layout probes."
 
   print "Validating visible release text: ${scenario}"
   "${SCRIPT_DIR}/validate-release-visual-text.swift" \

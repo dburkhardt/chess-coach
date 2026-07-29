@@ -4,7 +4,7 @@ Chess Coach is a native macOS training app that pairs local Stockfish analysis
 with grounded, position-aware explanations from a user-selected inference
 provider.
 
-Current prerelease: **0.1.0-beta.9**
+Current prerelease: **0.1.0-beta.10**
 
 ## Requirements
 
@@ -88,7 +88,10 @@ NOTARYTOOL_PROFILE="your-profile" \
 Preparation builds, tests, signs, and captures the exact candidate without
 installing it. Review and approve the generated contact sheet, then run
 `./scripts/release.sh publish` with the same environment to package, notarize,
-verify, install, and launch `dist/Chess-Coach-0.1.0-beta.9.dmg`. See
+verify, install, launch, and publish `dist/Chess-Coach-0.1.0-beta.10.dmg`.
+The source-bound receipt reaches `published` only after the Git tag, GitHub
+release, DMG asset, and checksum asset are remotely verified. Interrupted
+remote publication resumes from the preserved runtime-approved package. See
 [`docs/RELEASE.md`](docs/RELEASE.md) for the complete gated flow. No packaged
 binary is part of this source release.
 

@@ -4,11 +4,15 @@ set -euo pipefail
 SCRIPT_DIR=${0:A:h}
 REPO_DIR=${SCRIPT_DIR:h}
 DIST_DIR="${REPO_DIR}/dist"
-ARCHIVE_PATH="${DIST_DIR}/ChessCoach.xcarchive"
+PREPARE_ROOT="${DIST_DIR}/.preparing"
+PREPARE_ARCHIVE_PATH="${PREPARE_ROOT}/ChessCoach-$$.xcarchive"
+ARCHIVE_PATH=""
 STAGING_PATH="${DIST_DIR}/dmg-root"
 VERSION="0.1.0"
-PRERELEASE="beta.9"
-BUILD_NUMBER="9"
+PRERELEASE="beta.10"
+BUILD_NUMBER="10"
+RELEASE_TAG="v${VERSION}-${PRERELEASE}"
+RELEASE_TITLE="Chess Coach ${VERSION} ${PRERELEASE}"
 DMG_PATH="${DIST_DIR}/Chess-Coach-${VERSION}-${PRERELEASE}.dmg"
 CHECKSUM_PATH="${DMG_PATH}.sha256"
 PROVISIONAL_DMG_PATH="${DIST_DIR}/.Chess-Coach-${VERSION}-${PRERELEASE}.provisional.dmg"
@@ -19,12 +23,21 @@ usage() {
   cat <<'EOF'
 Usage:
   ./scripts/release.sh prepare
-  ./scripts/approve-release-visual-qa.sh --app dist/ChessCoach.xcarchive/Products/Applications/ChessCoach.app
+  ./scripts/release.sh capture
+  ./scripts/approve-release-visual-qa.sh --app <printed quarantined candidate path>
   ./scripts/release.sh publish
 
 prepare builds, tests, explicitly signs, and captures the exact release
 candidate in every required whole-window visual-QA state. It never creates, notarizes,
 installs, or launches a DMG.
+
+Prepared candidates live only under
+dist/.candidates/<commit>/<signed-executable-sha256>/ and carry a monotonic,
+source-bound receipt. A failed capture remains quarantined and cannot be
+published or opened through the normal approved-app launcher.
+
+capture retries visual QA against the exact signed built/capture-failed
+candidate without rebuilding or re-signing it.
 
 publish requires an interactive approval tied to the current Git commit, visual
 manifest, and exact signed app. It then packages, notarizes, verifies, and
@@ -38,21 +51,13 @@ EOF
 MODE=${1:-}
 case "${MODE}" in
   prepare|--prepare) MODE=prepare ;;
+  capture|--capture) MODE=capture ;;
   publish|--publish) MODE=publish ;;
   help|--help|-h) usage; exit 0 ;;
   "") usage >&2; exit 64 ;;
   *) print -u2 "Unknown release mode: ${MODE}"; usage >&2; exit 64 ;;
 esac
 (( $# == 1 )) || { usage >&2; exit 64; }
-if [[ "${MODE}" == "publish" && (! -t 0 || ! -t 1) ]]; then
-  print -u2 "Publish requires an interactive terminal for installed-app visual approval."
-  exit 1
-fi
-
-: "${DEVELOPER_ID_APPLICATION:?Set DEVELOPER_ID_APPLICATION to a Developer ID Application identity.}"
-: "${DEVELOPMENT_TEAM:?Set DEVELOPMENT_TEAM to the signing team identifier.}"
-: "${NOTARYTOOL_PROFILE:?Set NOTARYTOOL_PROFILE to a configured notarytool Keychain profile.}"
-
 MOUNT_PATH=""
 MOUNTED=0
 INSTALL_TEMP=""
@@ -65,6 +70,12 @@ CLEANUP_RUNNING=0
 FAILED_TARGET=""
 PROVISIONAL_EXECUTABLE_SHA=""
 PACKAGE_ACTIVE=0
+CANDIDATE_RECEIPT=""
+CANDIDATE_CAPTURE_PENDING=0
+PUBLISH_RESUME=0
+PUBLISH_ALREADY_PUBLISHED=0
+PUBLICATION_METADATA=""
+PUBLICATION_URL=""
 
 codesign_once() {
   if codesign "$@"; then
@@ -97,6 +108,115 @@ quit_installed_app_gracefully() {
     sleep 1
     (( elapsed += 1 ))
   done
+}
+
+publish_github_and_finalize_receipt() {
+  release_artifact_verify_runtime_package \
+    "${CANDIDATE_RECEIPT}" \
+    "${DIST_DIR}" \
+    "${INSTALL_TARGET}" || return 1
+  PUBLICATION_METADATA=$(mktemp \
+    "${TMPDIR:-/tmp}/chess-coach-publication-metadata.XXXXXX")
+  if ! release_github_publish \
+    "${REPO_DIR}" \
+    "${CANDIDATE_RECEIPT}" \
+    "${DMG_PATH}" \
+    "${CHECKSUM_PATH}" \
+    "${RELEASE_TAG}" \
+    "${RELEASE_TITLE}" \
+    >"${PUBLICATION_METADATA}"; then
+    print -u2 "GitHub publication did not complete."
+    print -u2 "The runtime-approved app and exact verified package were preserved."
+    print -u2 "Run ./scripts/release.sh publish again to resume without rebuilding."
+    return 1
+  fi
+
+  PUBLICATION_URL=$(release_artifact_value \
+    "${PUBLICATION_METADATA}" githubReleaseURL)
+  trap '' HUP INT TERM
+  if ! release_artifact_transition \
+    "${CANDIDATE_RECEIPT}" \
+    runtime-approved \
+    published \
+    dmgRelativePath "$(release_artifact_value "${CANDIDATE_RECEIPT}" dmgRelativePath)" \
+    dmgSHA256 "$(release_artifact_value "${CANDIDATE_RECEIPT}" dmgSHA256)" \
+    checksumRelativePath \
+      "$(release_artifact_value "${CANDIDATE_RECEIPT}" checksumRelativePath)" \
+    checksumSHA256 \
+      "$(release_artifact_value "${CANDIDATE_RECEIPT}" checksumSHA256)" \
+    githubRepository \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubRepository)" \
+    gitTag "$(release_artifact_value "${PUBLICATION_METADATA}" gitTag)" \
+    tagTargetCommit \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" tagTargetCommit)" \
+    githubReleaseURL "${PUBLICATION_URL}" \
+    githubReleaseProvenanceSHA256 \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubReleaseProvenanceSHA256)" \
+    githubDMGAssetName \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubDMGAssetName)" \
+    githubDMGAssetSHA256 \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubDMGAssetSHA256)" \
+    githubDMGAssetURL \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubDMGAssetURL)" \
+    githubChecksumAssetName \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubChecksumAssetName)" \
+    githubChecksumAssetSHA256 \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubChecksumAssetSHA256)" \
+    githubChecksumAssetURL \
+      "$(release_artifact_value "${PUBLICATION_METADATA}" githubChecksumAssetURL)"; then
+    trap 'exit 129' HUP
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
+    print -u2 "GitHub is verified, but the local receipt could not be finalized."
+    print -u2 "Run ./scripts/release.sh publish again to verify and finalize it."
+    return 1
+  fi
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  rm -f "${PUBLICATION_METADATA}"
+  PUBLICATION_METADATA=""
+}
+
+verify_existing_github_publication() {
+  release_artifact_verify_runtime_package \
+    "${CANDIDATE_RECEIPT}" \
+    "${DIST_DIR}" \
+    "${INSTALL_TARGET}" || return 1
+  PUBLICATION_METADATA=$(mktemp \
+    "${TMPDIR:-/tmp}/chess-coach-publication-verification.XXXXXX")
+  release_github_publish \
+    "${REPO_DIR}" \
+    "${CANDIDATE_RECEIPT}" \
+    "${DMG_PATH}" \
+    "${CHECKSUM_PATH}" \
+    "${RELEASE_TAG}" \
+    "${RELEASE_TITLE}" \
+    >"${PUBLICATION_METADATA}" || return 1
+
+  local field
+  for field in \
+    githubRepository \
+    gitTag \
+    tagTargetCommit \
+    githubReleaseURL \
+    githubReleaseProvenanceSHA256 \
+    githubDMGAssetName \
+    githubDMGAssetSHA256 \
+    githubDMGAssetURL \
+    githubChecksumAssetName \
+    githubChecksumAssetSHA256 \
+    githubChecksumAssetURL; do
+    [[ "$(release_artifact_value "${PUBLICATION_METADATA}" "${field}")" == \
+        "$(release_artifact_value "${CANDIDATE_RECEIPT}" "${field}")" ]] || {
+      print -u2 "Recorded publication field ${field} no longer matches GitHub."
+      return 1
+    }
+  done
+  PUBLICATION_URL=$(release_artifact_value \
+    "${PUBLICATION_METADATA}" githubReleaseURL)
+  rm -f "${PUBLICATION_METADATA}"
+  PUBLICATION_METADATA=""
 }
 
 cleanup() {
@@ -193,10 +313,32 @@ cleanup() {
   if [[ -n "${INSTALL_TEMP}" && -e "${INSTALL_TEMP}" ]]; then
     rm -rf "${INSTALL_TEMP}" || true
   fi
+  if [[ -e "${STAGING_PATH}" ]]; then
+    rm -rf "${STAGING_PATH}" || true
+  fi
   if [[ "${MODE}" == "publish" &&
         "${PACKAGE_ACTIVE}" == "1" &&
         "${INSTALL_COMMITTED}" == "0" ]]; then
     rm -f "${PROVISIONAL_DMG_PATH}" "${DMG_PATH}" "${CHECKSUM_PATH}" || true
+  fi
+  if [[ ("${MODE}" == "prepare" || "${MODE}" == "capture") &&
+        "${CANDIDATE_CAPTURE_PENDING}" == "1" &&
+        -n "${CANDIDATE_RECEIPT}" &&
+        -f "${CANDIDATE_RECEIPT}" &&
+        "$(release_artifact_value "${CANDIDATE_RECEIPT}" stage 2>/dev/null)" == "built" ]]; then
+    release_artifact_transition \
+      "${CANDIDATE_RECEIPT}" \
+      built \
+      capture-failed \
+      failureReason "prepare exited before visual capture completed" \
+      >/dev/null 2>&1 || true
+  fi
+  if [[ -e "${PREPARE_ARCHIVE_PATH}" ]]; then
+    rm -rf "${PREPARE_ARCHIVE_PATH}" || true
+  fi
+  if [[ -n "${PUBLICATION_METADATA}" &&
+        -f "${PUBLICATION_METADATA}" ]]; then
+    rm -f "${PUBLICATION_METADATA}" || true
   fi
 }
 trap cleanup EXIT
@@ -205,16 +347,48 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 
 source "${SCRIPT_DIR}/visual-qa-lib.sh"
+source "${SCRIPT_DIR}/release-artifact-lib.sh"
+source "${SCRIPT_DIR}/github-release-lib.sh"
 visual_qa_assert_clean_source
 "${SCRIPT_DIR}/verify-public-source.sh"
 "${SCRIPT_DIR}/scan-public-secrets.sh"
 "${SCRIPT_DIR}/audit-public-remote.sh"
 
-SIGNING_IDENTITIES=$(security find-identity -v -p codesigning)
-if [[ "${SIGNING_IDENTITIES}" != *"\"${DEVELOPER_ID_APPLICATION}\""* ]]; then
-  print -u2 "Required signing identity was not found:"
-  print -u2 "  ${DEVELOPER_ID_APPLICATION}"
+if [[ "${MODE}" == "publish" ]]; then
+  CANDIDATE_RECEIPT=$(release_artifact_find_for_current_source \
+    candidate-approved installed-approved runtime-approved published)
+  CANDIDATE_STAGE=$(release_artifact_value "${CANDIDATE_RECEIPT}" stage)
+  if [[ "${CANDIDATE_STAGE}" == \
+        "runtime-approved" &&
+        -n "$(release_artifact_value "${CANDIDATE_RECEIPT}" dmgRelativePath)" &&
+        -n "$(release_artifact_value "${CANDIDATE_RECEIPT}" dmgSHA256)" &&
+        -n "$(release_artifact_value "${CANDIDATE_RECEIPT}" checksumRelativePath)" &&
+        -n "$(release_artifact_value "${CANDIDATE_RECEIPT}" checksumSHA256)" ]]; then
+    PUBLISH_RESUME=1
+  elif [[ "${CANDIDATE_STAGE}" == "published" ]]; then
+    PUBLISH_ALREADY_PUBLISHED=1
+  fi
+fi
+
+if [[ "${MODE}" == "publish" && "${PUBLISH_RESUME}" == "0" &&
+      "${PUBLISH_ALREADY_PUBLISHED}" == "0" &&
+      (! -t 0 || ! -t 1) ]]; then
+  print -u2 "Initial Publish requires an interactive terminal for installed-app visual approval."
   exit 1
+fi
+
+if [[ "${MODE}" != "capture" && "${PUBLISH_RESUME}" == "0" &&
+      "${PUBLISH_ALREADY_PUBLISHED}" == "0" ]]; then
+  : "${DEVELOPER_ID_APPLICATION:?Set DEVELOPER_ID_APPLICATION to a Developer ID Application identity.}"
+  : "${DEVELOPMENT_TEAM:?Set DEVELOPMENT_TEAM to the signing team identifier.}"
+  : "${NOTARYTOOL_PROFILE:?Set NOTARYTOOL_PROFILE to a configured notarytool Keychain profile.}"
+
+  SIGNING_IDENTITIES=$(security find-identity -v -p codesigning)
+  if [[ "${SIGNING_IDENTITIES}" != *"\"${DEVELOPER_ID_APPLICATION}\""* ]]; then
+    print -u2 "Required signing identity was not found:"
+    print -u2 "  ${DEVELOPER_ID_APPLICATION}"
+    exit 1
+  fi
 fi
 
 mkdir -p "${DIST_DIR}"
@@ -223,7 +397,8 @@ if [[ "${MODE}" == "prepare" ]]; then
   "${SCRIPT_DIR}/fetch-stockfish.sh"
   "${SCRIPT_DIR}/generate-project.sh"
   visual_qa_assert_clean_source
-  rm -rf "${ARCHIVE_PATH}" "${STAGING_PATH}"
+  mkdir -p "${PREPARE_ROOT}"
+  rm -rf "${PREPARE_ARCHIVE_PATH}" "${STAGING_PATH}"
   rm -f "${PROVISIONAL_DMG_PATH}" "${DMG_PATH}" "${CHECKSUM_PATH}"
 
   CONFIGURATION=Debug "${SCRIPT_DIR}/test-unit.sh"
@@ -236,13 +411,26 @@ if [[ "${MODE}" == "prepare" ]]; then
     -scheme ChessCoach \
     -configuration Release \
     -destination 'generic/platform=macOS' \
-    -archivePath "${ARCHIVE_PATH}" \
+    -archivePath "${PREPARE_ARCHIVE_PATH}" \
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
     archive
+
+  ARCHIVE_PATH="${PREPARE_ARCHIVE_PATH}"
+elif [[ "${MODE}" == "capture" ]]; then
+  CANDIDATE_RECEIPT=$(release_artifact_find_for_current_source \
+    built capture-failed)
+  APP_PATH=$(release_artifact_candidate_app_for_receipt "${CANDIDATE_RECEIPT}")
+  ARCHIVE_PATH=${APP_PATH%/Products/Applications/ChessCoach.app}
+else
+  [[ -n "${CANDIDATE_RECEIPT}" ]] ||
+    CANDIDATE_RECEIPT=$(release_artifact_find_for_current_source \
+      candidate-approved installed-approved runtime-approved published)
+  APP_PATH=$(release_artifact_candidate_app_for_receipt "${CANDIDATE_RECEIPT}")
+  ARCHIVE_PATH=${APP_PATH%/Products/Applications/ChessCoach.app}
 fi
 
-APP_PATH="${ARCHIVE_PATH}/Products/Applications/ChessCoach.app"
+APP_PATH="${APP_PATH:-${ARCHIVE_PATH}/Products/Applications/ChessCoach.app}"
 ENGINE_PATH="${APP_PATH}/Contents/Resources/Engines/stockfish"
 [[ -d "${APP_PATH}" ]] ||
   { print -u2 "Prepared archive is missing. Run ./scripts/release.sh prepare first."; exit 1; }
@@ -267,16 +455,70 @@ fi
 codesign --verify --strict --verbose=2 "${ENGINE_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
 SIGNED_TEAM=$(codesign -dv --verbose=4 "${APP_PATH}" 2>&1 | sed -n 's/^TeamIdentifier=//p')
-if [[ "${SIGNED_TEAM}" != "${DEVELOPMENT_TEAM}" ]]; then
-  print -u2 "Signed app team mismatch: expected ${DEVELOPMENT_TEAM}, got ${SIGNED_TEAM:-none}."
+EXPECTED_SIGNED_TEAM=${DEVELOPMENT_TEAM:-$(release_artifact_value "${CANDIDATE_RECEIPT}" teamIdentifier)}
+if [[ "${SIGNED_TEAM}" != "${EXPECTED_SIGNED_TEAM}" ]]; then
+  print -u2 "Signed app team mismatch: expected ${EXPECTED_SIGNED_TEAM}, got ${SIGNED_TEAM:-none}."
   exit 1
 fi
 
 if [[ "${MODE}" == "prepare" ]]; then
-  "${SCRIPT_DIR}/capture-release-visual-qa.sh" --app "${APP_PATH}" --replace
+  COMMIT=$(git -C "${REPO_DIR}" rev-parse HEAD)
+  EXECUTABLE_PATH=$(release_artifact_app_executable "${APP_PATH}")
+  EXECUTABLE_SHA=$(release_artifact_sha256 "${EXECUTABLE_PATH}")
+  CANDIDATE_DIR=$(release_artifact_candidate_dir "${COMMIT}" "${EXECUTABLE_SHA}")
+  [[ ! -e "${CANDIDATE_DIR}" ]] ||
+    { print -u2 "Candidate already exists and will not be overwritten: ${CANDIDATE_DIR}"; exit 1; }
+  mkdir -p "${CANDIDATE_DIR:h}"
+  mv "${ARCHIVE_PATH}" "${CANDIDATE_DIR}/ChessCoach.xcarchive"
+  ARCHIVE_PATH="${CANDIDATE_DIR}/ChessCoach.xcarchive"
+  APP_PATH="${ARCHIVE_PATH}/Products/Applications/ChessCoach.app"
+  ENGINE_PATH="${APP_PATH}/Contents/Resources/Engines/stockfish"
+  CANDIDATE_RECEIPT="${CANDIDATE_DIR}/receipt.tsv"
+  release_artifact_write_new_receipt "${CANDIDATE_RECEIPT}" "${APP_PATH}"
+fi
+
+if [[ "${MODE}" == "prepare" || "${MODE}" == "capture" ]]; then
+  release_artifact_verify_candidate \
+    "${CANDIDATE_RECEIPT}" \
+    "${APP_PATH}" \
+    built capture-failed
+  CANDIDATE_DIR=${CANDIDATE_RECEIPT:h}
+  CAPTURE_FROM_STAGE=$(release_artifact_value "${CANDIDATE_RECEIPT}" stage)
+  CANDIDATE_CAPTURE_PENDING=1
+
+  if ! "${SCRIPT_DIR}/capture-release-visual-qa.sh" \
+    --app "${APP_PATH}" \
+    --replace; then
+    release_artifact_transition \
+      "${CANDIDATE_RECEIPT}" \
+      "${CAPTURE_FROM_STAGE}" \
+      capture-failed \
+      failureReason "required visual capture or validation failed"
+    CANDIDATE_CAPTURE_PENDING=0
+    print -u2
+    print -u2 "Candidate remains quarantined at:"
+    print -u2 "  ${CANDIDATE_DIR}"
+    print -u2 "It is not approved, installed, ready, or publishable."
+    print -u2 "For an explicitly labeled isolated preview only:"
+    print -u2 "  ./scripts/open-candidate-preview.sh --receipt \"${CANDIDATE_RECEIPT}\""
+    exit 1
+  fi
+
   EVIDENCE_DIR=$(visual_qa_evidence_dir "${APP_PATH}")
+  EVIDENCE_RELATIVE=${EVIDENCE_DIR#"${DIST_DIR}/"}
+  MANIFEST_SHA=$(release_artifact_sha256 "${EVIDENCE_DIR}/manifest.tsv")
+  release_artifact_transition \
+    "${CANDIDATE_RECEIPT}" \
+    "${CAPTURE_FROM_STAGE}" \
+    captured \
+    visualEvidenceRelativePath "${EVIDENCE_RELATIVE}" \
+    visualManifestSHA256 "${MANIFEST_SHA}"
+  CANDIDATE_CAPTURE_PENDING=0
   print
-  print "Release candidate prepared, signed, and visually captured."
+  print "Release candidate built, signed, and visually captured."
+  print "Lifecycle stage: captured (not approved, installed, ready, or published)."
+  print "Candidate: ${CANDIDATE_DIR}"
+  print "Receipt: ${CANDIDATE_RECEIPT}"
   print "No DMG was created, notarized, installed, or launched."
   print "Review: ${EVIDENCE_DIR}/contact-sheet.png"
   print "Approve: ./scripts/approve-release-visual-qa.sh --app \"${APP_PATH}\""
@@ -284,8 +526,36 @@ if [[ "${MODE}" == "prepare" ]]; then
   exit 0
 fi
 
+release_artifact_verify_candidate \
+  "${CANDIDATE_RECEIPT}" \
+  "${APP_PATH}" \
+  candidate-approved installed-approved runtime-approved published
 "${SCRIPT_DIR}/verify-release-visual-qa.sh" --app "${APP_PATH}"
 EVIDENCE_DIR=$(visual_qa_evidence_dir "${APP_PATH}")
+release_artifact_verify_candidate_approval \
+  "${CANDIDATE_RECEIPT}" \
+  "${EVIDENCE_DIR}"
+
+if [[ "${PUBLISH_RESUME}" == "1" ||
+      "${PUBLISH_ALREADY_PUBLISHED}" == "1" ]]; then
+  release_artifact_verify_runtime_package \
+    "${CANDIDATE_RECEIPT}" \
+    "${DIST_DIR}" \
+    "${INSTALL_TARGET}"
+  "${SCRIPT_DIR}/open-approved-app.sh" --verify-only
+  if [[ "${PUBLISH_ALREADY_PUBLISHED}" == "1" ]]; then
+    verify_existing_github_publication
+    print "Publication remains fully verified: ${PUBLICATION_URL}"
+    print "Installed approved app remains at: ${INSTALL_TARGET}"
+    exit 0
+  fi
+  print "Resuming GitHub publication from the preserved runtime-approved package."
+  publish_github_and_finalize_receipt
+  print "Published and remotely verified: ${PUBLICATION_URL}"
+  print "Installed approved app preserved at: ${INSTALL_TARGET}"
+  exit 0
+fi
+
 PACKAGE_ACTIVE=1
 rm -rf "${STAGING_PATH}"
 rm -f "${PROVISIONAL_DMG_PATH}" "${DMG_PATH}" "${CHECKSUM_PATH}"
@@ -299,6 +569,7 @@ hdiutil create \
   -ov \
   -format UDZO \
   "${PROVISIONAL_DMG_PATH}"
+rm -rf "${STAGING_PATH}"
 
 codesign_once --force --timestamp --sign "${DEVELOPER_ID_APPLICATION}" "${PROVISIONAL_DMG_PATH}"
 codesign --verify --strict --verbose=2 "${PROVISIONAL_DMG_PATH}"
@@ -412,6 +683,23 @@ MOUNT_PATH=""
   --app "${INSTALL_TARGET}" \
   --evidence "${EVIDENCE_DIR}"
 
+INSTALLED_EVIDENCE="${EVIDENCE_DIR}/installed"
+INSTALLED_MANIFEST="${INSTALLED_EVIDENCE}/manifest.tsv"
+INSTALLED_VISUAL_APPROVAL="${INSTALLED_EVIDENCE}/approval.tsv"
+CURRENT_CANDIDATE_STAGE=$(release_artifact_value "${CANDIDATE_RECEIPT}" stage)
+if [[ "${CURRENT_CANDIDATE_STAGE}" == "runtime-approved" ]]; then
+  NEXT_INSTALLED_STAGE="runtime-approved"
+else
+  NEXT_INSTALLED_STAGE="installed-approved"
+fi
+release_artifact_transition \
+  "${CANDIDATE_RECEIPT}" \
+  "${CURRENT_CANDIDATE_STAGE}" \
+  "${NEXT_INSTALLED_STAGE}" \
+  installedManifestSHA256 "$(release_artifact_sha256 "${INSTALLED_MANIFEST}")" \
+  installedVisualApprovalSHA256 \
+    "$(release_artifact_sha256 "${INSTALLED_VISUAL_APPROVAL}")"
+
 open "${INSTALL_TARGET}"
 LAUNCH_PID=""
 LAUNCH_WAITED=0
@@ -444,6 +732,14 @@ LAUNCH_COMMAND=$(ps -ww -p "${LAUNCH_PID%%$'\n'*}" -o command=)
   --evidence "${EVIDENCE_DIR}" \
   --pid "${LAUNCH_PID%%$'\n'*}"
 
+RUNTIME_APPROVAL="${INSTALLED_EVIDENCE}/runtime-approval.tsv"
+CURRENT_CANDIDATE_STAGE=$(release_artifact_value "${CANDIDATE_RECEIPT}" stage)
+release_artifact_transition \
+  "${CANDIDATE_RECEIPT}" \
+  "${CURRENT_CANDIDATE_STAGE}" \
+  runtime-approved \
+  runtimeApprovalSHA256 "$(release_artifact_sha256 "${RUNTIME_APPROVAL}")"
+
 LAUNCH_PID=$(installed_app_pids)
 [[ -n "${LAUNCH_PID}" ]] ||
   { print -u2 "Chess Coach is not running after prompt-free runtime approval."; exit 1; }
@@ -451,17 +747,49 @@ LAUNCH_COMMAND=$(ps -ww -p "${LAUNCH_PID%%$'\n'*}" -o command=)
 [[ "${LAUNCH_COMMAND}" == "/Applications/Chess Coach.app/Contents/MacOS/ChessCoach"* ]] ||
   { print -u2 "Unexpected approved process: ${LAUNCH_COMMAND}"; exit 1; }
 
+"${SCRIPT_DIR}/open-approved-app.sh" --verify-only
+
 # Only the fully accepted artifact receives the public release filename.
 mv "${PROVISIONAL_DMG_PATH}" "${DMG_PATH}"
-shasum -a 256 "${DMG_PATH}" > "${CHECKSUM_PATH}"
+(
+  cd "${DIST_DIR}"
+  shasum -a 256 "${DMG_PATH:t}" > "${CHECKSUM_PATH:t}"
+)
+DMG_SHA=$(release_artifact_sha256 "${DMG_PATH}")
+# Commit the locally accepted installation and exact package before any
+# network publication. A GitHub interruption must preserve these bytes so a
+# retry cannot regenerate a differently timestamped/notarized DMG.
+trap '' HUP INT TERM
+if ! release_artifact_transition \
+  "${CANDIDATE_RECEIPT}" \
+  runtime-approved \
+  runtime-approved \
+  dmgRelativePath "${DMG_PATH:t}" \
+  dmgSHA256 "${DMG_SHA}" \
+  checksumRelativePath "${CHECKSUM_PATH:t}" \
+  checksumSHA256 "$(release_artifact_sha256 "${CHECKSUM_PATH}")"; then
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  print -u2 "Could not commit the runtime-approved package receipt."
+  exit 1
+fi
 INSTALL_COMMITTED=1
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 if [[ -n "${REPLACED_TARGET}" && -e "${REPLACED_TARGET}" ]]; then
   rm -rf "${REPLACED_TARGET}"
 fi
 REPLACED_TARGET=""
 
-print "Release ready for team ${DEVELOPMENT_TEAM}: ${DMG_PATH}"
-print "Checksum: ${CHECKSUM_PATH}"
+release_artifact_verify_runtime_package \
+  "${CANDIDATE_RECEIPT}" \
+  "${DIST_DIR}" \
+  "${INSTALL_TARGET}"
+publish_github_and_finalize_receipt
+
+print "Published and remotely verified: ${PUBLICATION_URL}"
 print "Installed and launched: ${INSTALL_TARGET}"
 print "Installed whole-window visual QA was separately approved."
 print "A fresh normal launch was explicitly approved as free of Keychain/password prompts."

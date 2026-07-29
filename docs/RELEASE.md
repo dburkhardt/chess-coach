@@ -4,6 +4,16 @@ Chess Coach releases are intentionally split into three human-visible stages.
 There is no one-command path that can build, publish, and install an unreviewed
 app.
 
+Each artifact also has a machine-readable lifecycle receipt:
+
+```text
+built → capture-failed → captured → candidate-approved
+      → installed-approved → runtime-approved → published
+```
+
+Stages never move backward. Reaching a stage records the hashes of the evidence
+required by that stage.
+
 ## 1. Prepare the exact candidate
 
 Start from a clean, committed worktree:
@@ -29,6 +39,18 @@ archive, explicitly signs Stockfish and then the app, and runs the signed app's
 in-process visual-QA harness. It does **not** create or notarize a DMG, modify
 `/Applications`, or launch a replacement app.
 
+The signed archive is immediately quarantined at:
+
+```text
+dist/.candidates/<git-commit>/<signed-executable-sha256>/
+├── ChessCoach.xcarchive/
+└── receipt.tsv
+```
+
+There is deliberately no friendly `dist/ChessCoach.xcarchive` path. The receipt
+binds the stage to the source commit/tree, version/build, bundle ID, executable
+SHA-256, Code Directory hash, Team ID, and signing authority.
+
 Prepare must run from an unlocked, interactive macOS GUI session. Because
 macOS can route same-bundle-ID scene activation to an already running copy,
 Prepare asks an installed Chess Coach to quit normally before opening the exact
@@ -46,6 +68,23 @@ separately composited materials and inspectors, so it is not accepted as a
 fallback. If foreground capture is unavailable, Prepare stops before approval,
 packaging, notarization, installation, or publication.
 
+The receipt becomes `capture-failed`, and the exact signed artifact can be
+retried without rebuilding or re-signing:
+
+```bash
+./scripts/release.sh capture
+```
+
+A failed candidate may be opened for diagnosis only with
+`./scripts/open-candidate-preview.sh`. That explicit path supplies
+`--candidate-preview`, isolates games, preferences, and credentials, and keeps
+an orange `QA Candidate · Unapproved` banner visible. It is not an approval.
+
+Candidate capture runs the complete scenario list inside one long-lived
+shipping process. macOS may require one click to make that window foreground
+and key at the start; the runner then resets the app between scenarios without
+relaunching it or racing another bundle with the same identifier.
+
 The harness captures these full windows:
 
 - `fresh-default-dark`: the first game at the normal window size in Dark Mode.
@@ -55,6 +94,15 @@ The harness captures these full windows:
 - `fresh-default-light`: the first game at the normal size in Light Mode.
 - `sidebar-collapsed-default-dark`: the native navigation sidebar collapsed
   while the game and Coach remain usable.
+- `sidebar-restored-expanded-default-light`: the same native sidebar expanded
+  again after a real collapse/expand cycle, guarding restored horizontal
+  offsets and leading-edge clipping.
+- `sidebar-minimum-width-default-light` and
+  `sidebar-maximum-width-default-light`: the expanded native sidebar at its
+  190- and 260-point boundaries.
+- `sidebar-inactive-selection-default-light` and
+  `sidebar-inactive-selection-default-dark`: the selected destination in its
+  inactive-window treatment in both appearances.
 - `lesson-default-dark`: an unclocked teaching moment with inline Reveal and
   quiet Done controls.
 - `lesson-clocked-default-dark`: a clocked teaching moment with its explicit
@@ -62,6 +110,11 @@ The harness captures these full windows:
 - `completed-default-dark`: a finished game with its compact Coach treatment.
 - `missing-inference-key-default-light`: the live Coach warning and working
   route shown when no inference credential is configured.
+- `missing-inference-key-minimum-inspector-light`,
+  `missing-inference-key-minimum-inspector-large-text-light`, and
+  `missing-inference-key-maximum-inspector-light`: the same footer at the
+  Coach inspector's 300- and 460-point boundaries, including its vertically
+  adapting large-text treatment at the minimum width.
 - `inference-settings-default-light`: the main Settings screen scrolled to,
   focused on, and pointer-tested through the provider-neutral Inference key
   field. The process must remain responsive for five seconds afterward.
@@ -71,10 +124,15 @@ scenes use a keyless custom OpenAI-compatible provider pointed at a closed local
 port; the two configuration scenes deliberately use an empty credential. The
 release gate never reads a real key or sends a request to an external provider.
 
-Each process writes a PNG and a JSON sidecar identifying the scenario, capture
-kind, app version/build, bundle ID, and pixel size. A release capture is rejected
-if an image is missing, cropped below the whole-window minimum, mislabeled, or
-does not match its sidecar.
+The process writes a PNG and a JSON sidecar for each scenario. In addition to
+the scenario, capture kind, app version/build, bundle ID, and pixel size, every
+sidecar records screen-space frames for the window, navigation and its rows,
+game-detail column, board, move history, Coach inspector, and provider footer
+when present. Board and move-history probes are owned by game detail, and every
+probe is generically checked against its declared owner. Capture fails before
+writing evidence when a required probe is missing, has a non-positive frame,
+leaves its owner, overlaps another column, or misses a requested boundary
+width.
 
 Before any evidence is accepted, a native macOS Vision pass also verifies that
 scenario-critical text is visibly present in the pixels. Navigation labels must
@@ -85,6 +143,11 @@ their scene-specific teaching or outcome text. The missing-key and Settings
 captures require the provider-neutral warning, route, Inference heading,
 provider, secure-key label, and model field. This automated check is a regression
 guard, not a substitute for inspecting the contact sheet.
+
+`ChessCoachTests/Fixtures/beta9-truncated-navigation.png` is the original
+truncated beta.9 window capture. A unit test runs that real pixel artifact
+through the same Vision validator and requires rejection, so OCR-region
+regressions cannot be replaced by geometry-only fixtures.
 
 Prepare creates:
 
@@ -100,18 +163,22 @@ The manifest binds every file to the exact Git commit and tree, required
 scenario-list hash, version/build, executable SHA-256, signed-app Code Directory
 hash, Team ID, and signing authority.
 
+Successful capture changes the receipt to `captured`; the artifact is still not
+approved, installed, ready, or published.
+
 ## 2. Review and explicitly approve
 
 Run the approval command printed by Prepare:
 
 ```bash
 ./scripts/approve-release-visual-qa.sh \
-  --app dist/ChessCoach.xcarchive/Products/Applications/ChessCoach.app
+  --app "<exact quarantined app path printed by Prepare>"
 ```
 
 The command verifies the evidence, opens the contact sheet, asks for the
 reviewer's name, and requires them to type `APPROVE <commit>`. It records the
-commit and manifest SHA-256 in `approval.tsv`.
+commit and manifest SHA-256 in `approval.tsv`, then advances the receipt to
+`candidate-approved`.
 
 Before approving, inspect every labeled window in the required scenario list and confirm:
 
@@ -153,7 +220,7 @@ normally and waits for it; it never silently force-quits a game.
 
 The package keeps a hidden provisional filename throughout notarization,
 installation, installed-window review, and prompt-free runtime review. Publish
-promotes it to `Chess-Coach-0.1.0-beta.9.dmg` and writes the checksum only after
+promotes it to `Chess-Coach-0.1.0-beta.10.dmg` and writes the checksum only after
 every gate passes. A failed or interrupted run removes the provisional package
 and restores the prior installed app.
 
@@ -174,11 +241,12 @@ installed executable in a post-install visual-QA mode which:
 If capture, OCR, or installed-app approval fails, Publish rolls back to the
 previous app and never reports the release complete. Only after installed visual
 approval does it launch the app normally and require a stable process at the
-exact installed executable path.
+exact installed executable path. This advances the receipt to
+`installed-approved`.
 
 A screenshot cannot prove that macOS did not present a SecurityAgent dialog.
-Publish therefore has a final, separate runtime gate. Beta 9 uses the
-provider-isolated credential service, never reads or migrates legacy
+Publish therefore has a final, separate runtime gate. The installed app uses
+the provider-isolated credential service and never reads or migrates legacy
 provider-specific entries, and explicitly prohibits authentication UI during
 credential operations. It also rejects sustained app-process CPU or memory
 growth that would indicate a render spin. The gate uses a separate release-QA-only service
@@ -205,6 +273,8 @@ service or account. The gate:
 
 Any repeated Keychain/password prompt fails publication and triggers rollback.
 The release is not committed merely because the app process remained alive.
+Successful prompt-free runtime approval advances the receipt to
+`runtime-approved`.
 
 Any source edit, rebuild, re-sign, changed capture, or changed scenario
 requirement forces a new Prepare → Review → Approve cycle. Neither stage runs
@@ -213,6 +283,54 @@ the Xcode UI-test runner.
 Development builds and unit tests disable code signing. The release flow invokes
 each Developer ID signing command once and stops on failure; it does not retry a
 Keychain authorization failure or ask for a password in the terminal.
+
+After runtime approval, Publish atomically records the final DMG and checksum
+basenames and SHA-256 hashes while the receipt remains `runtime-approved`. At
+that point the accepted `/Applications` installation and those exact package
+bytes are durable. A GitHub or network failure does not roll them back or
+delete them. Running `./scripts/release.sh publish` again skips signing,
+notarization, installation, and human gates and resumes from the preserved
+package.
+
+GitHub publication is source-bound and retry-safe:
+
+- The annotated `v0.1.0-beta.10` tag must resolve locally and remotely to the
+  receipt commit, whose Git tree must also match.
+- A new GitHub release starts as a private draft with canonical provenance for
+  the source commit/tree, signed executable SHA-256, Code Directory hash, DMG
+  SHA-256, and checksum-asset SHA-256.
+- Only missing draft assets are uploaded. A mismatched asset may be replaced
+  only while that exact-provenance release is still a draft; a mismatch on a
+  public release is a hard failure.
+- Both assets must report the expected GitHub SHA-256 digest, download with the
+  same byte hash, and the downloaded checksum must validate the downloaded DMG.
+- The draft is made public only after those checks, then the public release,
+  assets, and remote tag target are verified again.
+
+Only after the verified tag, GitHub release URL, remote asset names, public
+asset URLs, and remote digests are atomically recorded does the receipt reach
+`published`. If GitHub became public immediately before a local interruption,
+the next Publish run verifies the existing release and completes the receipt
+without replacing anything. Repeating Publish after `published` is a
+verification-only operation.
+
+## Opening Chess Coach safely
+
+For an ordinary “open the app” request, always run:
+
+```bash
+./scripts/open-approved-app.sh
+```
+
+It targets only `/Applications/Chess Coach.app`, verifies the executable and
+Code Directory hashes against installed visual and prompt-free runtime
+approvals, then verifies the launched process path. During the beta.8-to-beta.10
+transition it can validate beta.8's legacy hash-bound evidence without creating
+a synthetic receipt.
+
+Never directly open an app under `dist/.candidates`, an `.xcarchive`,
+DerivedData, or another build directory. The repository `AGENTS.md` makes this
+rule explicit for automation.
 
 ## Post-install proof
 
@@ -226,6 +344,9 @@ The publish command enforces all of these before it can report completion:
    `/Applications/Chess Coach.app/Contents/MacOS/ChessCoach`.
 5. Gracefully relaunch the same artifact, observe it for Keychain/password
    prompts, and require a hash-bound human `APPROVE PROMPT-FREE` decision.
+6. Preserve the exact runtime-approved app, DMG, and checksum before any remote
+   mutation, then verify the source tag and GitHub release assets before the
+   receipt can say `published`.
 
 The installation/rollback transition is signal-safe: state is recorded before
 each `/Applications` rename, rollback ignores subsequent termination signals

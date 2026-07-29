@@ -12,6 +12,13 @@ import SwiftUI
 ///       --output-directory=/absolute/path \
 ///       --scenario=fresh-default-dark
 ///
+/// Release preparation normally captures every candidate scenario in one
+/// foreground session:
+///
+///     ChessCoach --visual-qa \
+///       --output-directory=/absolute/path \
+///       --scenario-sequence=fresh-default-dark,fresh-compact-dark,...
+///
 /// After installation, the release gate also invokes:
 ///
 ///     ChessCoach --installed-visual-qa \
@@ -23,7 +30,7 @@ import SwiftUI
 /// scenario deliberately uses `UserDefaults.standard`, including AppKit's real
 /// restored window/layout preferences, while keeping game data and credentials
 /// isolated. Each invocation captures the complete composited window, writes a
-/// PNG and JSON sidecar, then exits.
+/// PNG and JSON sidecar for every requested scenario, then exits.
 struct ReleaseVisualQAConfiguration {
     enum Mode: Equatable {
         case candidate
@@ -36,11 +43,27 @@ struct ReleaseVisualQAConfiguration {
         case freshDefaultLight = "fresh-default-light"
         case sidebarCollapsedDefaultDark =
             "sidebar-collapsed-default-dark"
+        case sidebarRestoredExpandedDefaultLight =
+            "sidebar-restored-expanded-default-light"
+        case sidebarMinimumWidthDefaultLight =
+            "sidebar-minimum-width-default-light"
+        case sidebarMaximumWidthDefaultLight =
+            "sidebar-maximum-width-default-light"
+        case sidebarInactiveSelectionDefaultLight =
+            "sidebar-inactive-selection-default-light"
+        case sidebarInactiveSelectionDefaultDark =
+            "sidebar-inactive-selection-default-dark"
         case lessonDefaultDark = "lesson-default-dark"
         case lessonClockedDefaultDark = "lesson-clocked-default-dark"
         case completedDefaultDark = "completed-default-dark"
         case missingInferenceKeyDefaultLight =
             "missing-inference-key-default-light"
+        case missingInferenceKeyMinimumInspectorLight =
+            "missing-inference-key-minimum-inspector-light"
+        case missingInferenceKeyMinimumInspectorLargeTextLight =
+            "missing-inference-key-minimum-inspector-large-text-light"
+        case missingInferenceKeyMaximumInspectorLight =
+            "missing-inference-key-maximum-inspector-light"
         case inferenceSettingsDefaultLight =
             "inference-settings-default-light"
         case installedDefaultDark = "installed-default-dark"
@@ -57,19 +80,95 @@ struct ReleaseVisualQAConfiguration {
         var colorScheme: ColorScheme {
             switch self {
             case .freshDefaultLight,
+                 .sidebarRestoredExpandedDefaultLight,
+                 .sidebarMinimumWidthDefaultLight,
+                 .sidebarMaximumWidthDefaultLight,
+                 .sidebarInactiveSelectionDefaultLight,
                  .missingInferenceKeyDefaultLight,
+                 .missingInferenceKeyMinimumInspectorLight,
+                 .missingInferenceKeyMinimumInspectorLargeTextLight,
+                 .missingInferenceKeyMaximumInspectorLight,
                  .inferenceSettingsDefaultLight:
                 .light
             default:
                 .dark
             }
         }
+
+        var expectsExpandedNavigation: Bool {
+            switch self {
+            case .freshCompactDark, .sidebarCollapsedDefaultDark:
+                false
+            default:
+                true
+            }
+        }
+
+        var requestedNavigationWidth: CGFloat? {
+            switch self {
+            case .sidebarMinimumWidthDefaultLight:
+                AppNavigationSidebarMetrics.minimumWidth
+            case .sidebarMaximumWidthDefaultLight:
+                AppNavigationSidebarMetrics.maximumWidth
+            default:
+                nil
+            }
+        }
+
+        var requestedInspectorWidth: CGFloat? {
+            switch self {
+            case .missingInferenceKeyMinimumInspectorLight:
+                300
+            case .missingInferenceKeyMinimumInspectorLargeTextLight:
+                300
+            case .missingInferenceKeyMaximumInspectorLight:
+                460
+            default:
+                nil
+            }
+        }
+
+        var exercisesMissingInferenceConfiguration: Bool {
+            switch self {
+            case .missingInferenceKeyDefaultLight,
+                 .missingInferenceKeyMinimumInspectorLight,
+                 .missingInferenceKeyMinimumInspectorLargeTextLight,
+                 .missingInferenceKeyMaximumInspectorLight,
+                 .inferenceSettingsDefaultLight:
+                true
+            default:
+                false
+            }
+        }
+
+        var usesInactiveNavigationSelection: Bool {
+            switch self {
+            case .sidebarInactiveSelectionDefaultLight,
+                 .sidebarInactiveSelectionDefaultDark:
+                true
+            default:
+                false
+            }
+        }
+
+        var usesLargeText: Bool {
+            self == .missingInferenceKeyMinimumInspectorLargeTextLight
+        }
     }
 
     let mode: Mode
-    let scenario: Scenario
+    let scenarios: [Scenario]
     let outputDirectory: URL
     private let isolationIdentifier = UUID().uuidString
+
+    /// Scene construction needs one deterministic initial size and appearance.
+    /// The runner mutates the real shipping window for subsequent scenarios.
+    var scenario: Scenario {
+        guard let scenario = scenarios.first else {
+            preconditionFailure("Visual QA requires at least one scenario.")
+        }
+        return scenario
+    }
 
     static var isRequested: Bool {
         let arguments = ProcessInfo.processInfo.arguments
@@ -158,6 +257,9 @@ struct ReleaseVisualQAConfiguration {
         defaults.set("visual-qa-model", forKey: "ai.modelID")
         switch scenario {
         case .missingInferenceKeyDefaultLight,
+             .missingInferenceKeyMinimumInspectorLight,
+             .missingInferenceKeyMinimumInspectorLargeTextLight,
+             .missingInferenceKeyMaximumInspectorLight,
              .inferenceSettingsDefaultLight:
             // These scenarios deliberately exercise the public missing-key
             // configuration flow without touching real credential storage.
@@ -201,30 +303,59 @@ struct ReleaseVisualQAConfiguration {
         guard outputPath.hasPrefix("/") else {
             throw ReleaseVisualQAError.outputDirectoryMustBeAbsolute
         }
-        guard let scenarioName = value(for: "--scenario", in: arguments),
-              let scenario = Scenario(rawValue: scenarioName)
+        let scenarioNames: [String]
+        if let sequence = value(for: "--scenario-sequence", in: arguments) {
+            guard value(for: "--scenario", in: arguments) == nil else {
+                throw ReleaseVisualQAError.conflictingScenarioArguments
+            }
+            scenarioNames = sequence
+                .split(separator: ",")
+                .map(String.init)
+        } else if let scenarioName = value(
+            for: "--scenario",
+            in: arguments
+        ) {
+            scenarioNames = [scenarioName]
+        } else {
+            throw ReleaseVisualQAError.invalidScenario
+        }
+        let scenarios = scenarioNames.compactMap(Scenario.init(rawValue:))
+        guard !scenarios.isEmpty,
+              scenarios.count == scenarioNames.count,
+              Set(scenarios.map(\.rawValue)).count == scenarios.count
         else {
             throw ReleaseVisualQAError.invalidScenario
         }
         let mode: Mode = installedRequested ? .installed : .candidate
-        switch (mode, scenario) {
-        case (.candidate, .installedDefaultDark),
-             (.installed, .freshDefaultDark),
-             (.installed, .freshCompactDark),
-             (.installed, .freshDefaultLight),
-             (.installed, .sidebarCollapsedDefaultDark),
-             (.installed, .lessonDefaultDark),
-             (.installed, .lessonClockedDefaultDark),
-             (.installed, .completedDefaultDark),
-             (.installed, .missingInferenceKeyDefaultLight),
-             (.installed, .inferenceSettingsDefaultLight):
-            throw ReleaseVisualQAError.scenarioModeMismatch
-        default:
-            break
+        for scenario in scenarios {
+            switch (mode, scenario) {
+            case (.candidate, .installedDefaultDark),
+                 (.installed, .freshDefaultDark),
+                 (.installed, .freshCompactDark),
+                 (.installed, .freshDefaultLight),
+                 (.installed, .sidebarCollapsedDefaultDark),
+                 (.installed, .sidebarRestoredExpandedDefaultLight),
+                 (.installed, .sidebarMinimumWidthDefaultLight),
+                 (.installed, .sidebarMaximumWidthDefaultLight),
+                 (.installed, .sidebarInactiveSelectionDefaultLight),
+                 (.installed, .sidebarInactiveSelectionDefaultDark),
+                 (.installed, .lessonDefaultDark),
+                 (.installed, .lessonClockedDefaultDark),
+                 (.installed, .completedDefaultDark),
+                 (.installed, .missingInferenceKeyDefaultLight),
+                 (.installed, .missingInferenceKeyMinimumInspectorLight),
+                 (.installed,
+                    .missingInferenceKeyMinimumInspectorLargeTextLight),
+                 (.installed, .missingInferenceKeyMaximumInspectorLight),
+                 (.installed, .inferenceSettingsDefaultLight):
+                throw ReleaseVisualQAError.scenarioModeMismatch
+            default:
+                break
+            }
         }
         return ReleaseVisualQAConfiguration(
             mode: mode,
-            scenario: scenario,
+            scenarios: scenarios,
             outputDirectory: URL(
                 fileURLWithPath: outputPath,
                 isDirectory: true
@@ -249,6 +380,12 @@ struct ReleaseVisualQAConfiguration {
     }
 }
 
+enum ReleaseVisualQAViewOverrides {
+    static let inactiveNavigationSelectionKey =
+        "release.visualQA.inactiveNavigationSelection"
+    static let largeTextKey = "release.visualQA.largeText"
+}
+
 private struct ReleaseVisualQACredentialStore: KeychainStoring, Sendable {
     let persistenceAvailability: CredentialPersistenceAvailability =
         .sessionOnly
@@ -271,6 +408,7 @@ private enum ReleaseVisualQAError: LocalizedError {
     case outputDirectoryMustBeAbsolute
     case invalidScenario
     case conflictingModes
+    case conflictingScenarioArguments
     case scenarioModeMismatch
     case windowUnavailable
     case positionAnalysisTimedOut
@@ -280,6 +418,9 @@ private enum ReleaseVisualQAError: LocalizedError {
     case foregroundCaptureRequired
     case compositedWindowUnavailable
     case pngEncodingFailed
+    case splitViewUnavailable(String)
+    case layoutProbeUnavailable(String)
+    case invalidLayout([String])
 
     var errorDescription: String? {
         switch self {
@@ -288,12 +429,14 @@ private enum ReleaseVisualQAError: LocalizedError {
         case .outputDirectoryMustBeAbsolute:
             "--output-directory=<path> must use an absolute path"
         case .invalidScenario:
-            "unknown or missing --scenario=<name>; expected one of " +
+            "unknown, duplicate, or missing visual-QA scenario; expected one of " +
                 ReleaseVisualQAConfiguration.Scenario.allCases
                 .map(\.rawValue)
                 .joined(separator: ", ")
         case .conflictingModes:
             "specify exactly one of --visual-qa or --installed-visual-qa"
+        case .conflictingScenarioArguments:
+            "specify --scenario or --scenario-sequence, not both"
         case .scenarioModeMismatch:
             "the selected visual-QA scenario does not match the requested mode"
         case .windowUnavailable:
@@ -314,7 +457,244 @@ private enum ReleaseVisualQAError: LocalizedError {
             "the WindowServer could not capture the composited native window"
         case .pngEncodingFailed:
             "AppKit could not encode the full-window PNG"
+        case .splitViewUnavailable(let pane):
+            "the shipping \(pane) split-view pane could not be resized"
+        case .layoutProbeUnavailable(let name):
+            "the required \(name) layout probe was unavailable"
+        case .invalidLayout(let failures):
+            "release layout validation failed: " +
+                failures.joined(separator: "; ")
         }
+    }
+}
+
+struct ReleaseVisualQARect: Codable, Equatable, Sendable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+
+    init(_ rect: CGRect) {
+        x = rect.origin.x
+        y = rect.origin.y
+        width = rect.width
+        height = rect.height
+    }
+
+    var cgRect: CGRect {
+        CGRect(x: x, y: y, width: width, height: height)
+    }
+}
+
+struct ReleaseVisualQALayoutProbe: Codable, Equatable, Sendable {
+    let name: String
+    let owner: String
+    let frame: ReleaseVisualQARect
+}
+
+struct ReleaseVisualQALayoutEvidence: Codable, Equatable, Sendable {
+    let coordinateSpace: String
+    let requestedNavigationWidth: Double?
+    let requestedInspectorWidth: Double?
+    let probes: [ReleaseVisualQALayoutProbe]
+    let validation: String
+}
+
+enum ReleaseVisualQALayoutValidator {
+    static let window = "window"
+    static let navigation = "navigation"
+    static let gameDetail = "game-detail"
+    static let coachInspector = "coach-inspector"
+    static let board = "board"
+    static let moveHistory = "move-history"
+    static let providerFooter = "provider-footer"
+    static let configureInference = "configure-inference"
+
+    static let navigationRows = [
+        "navigation-newGame",
+        "navigation-currentGame",
+        "navigation-games",
+        "navigation-progress",
+        "navigation-settings",
+    ]
+
+    static func failures(
+        probes: [ReleaseVisualQALayoutProbe],
+        scenario: ReleaseVisualQAConfiguration.Scenario
+    ) -> [String] {
+        var failures: [String] = []
+        var frames: [String: CGRect] = [:]
+
+        for probe in probes {
+            if frames[probe.name] != nil {
+                failures.append("\(probe.name) probe is duplicated")
+                continue
+            }
+            frames[probe.name] = probe.frame.cgRect
+            let frame = probe.frame.cgRect
+            if !frame.origin.x.isFinite ||
+                !frame.origin.y.isFinite ||
+                !frame.width.isFinite ||
+                !frame.height.isFinite ||
+                frame.width <= 0 ||
+                frame.height <= 0 {
+                failures.append("\(probe.name) has an invalid frame")
+            }
+        }
+
+        let expectedOwners = [
+            navigation: window,
+            gameDetail: window,
+            coachInspector: window,
+            board: gameDetail,
+            moveHistory: gameDetail,
+            providerFooter: coachInspector,
+            configureInference: providerFooter,
+        ].merging(
+            Dictionary(
+                uniqueKeysWithValues: navigationRows.map {
+                    ($0, navigation)
+                }
+            )
+        ) { current, _ in current }
+        for probe in probes {
+            if let expectedOwner = expectedOwners[probe.name],
+               probe.owner != expectedOwner {
+                failures.append(
+                    "\(probe.name) must be owned by " +
+                        displayName(expectedOwner)
+                )
+            }
+        }
+
+        guard frames[window] != nil else {
+            return failures + ["window probe is missing"]
+        }
+
+        for probe in probes where probe.name != window {
+            guard !probe.owner.isEmpty else {
+                failures.append("\(probe.name) has no layout owner")
+                continue
+            }
+            guard let ownerFrame = frames[probe.owner] else {
+                failures.append(
+                    "\(probe.name) owner \(displayName(probe.owner)) " +
+                        "probe is missing"
+                )
+                continue
+            }
+            if !contains(ownerFrame, probe.frame.cgRect, tolerance: 2) {
+                failures.append(
+                    "\(probe.name) extends outside " +
+                        displayName(probe.owner)
+                )
+            }
+        }
+
+        if scenario.expectsExpandedNavigation {
+            if let navigationFrame = frames[navigation] {
+                for row in navigationRows {
+                    guard frames[row] != nil else {
+                        failures.append("\(row) probe is missing")
+                        continue
+                    }
+                }
+                if let requested = scenario.requestedNavigationWidth,
+                   abs(navigationFrame.width - requested) > 8 {
+                    failures.append(
+                        "navigation width \(rounded(navigationFrame.width)) " +
+                            "does not match requested \(rounded(requested))"
+                    )
+                }
+            } else {
+                failures.append("expanded navigation probe is missing")
+            }
+        }
+
+        if scenario.exercisesMissingInferenceConfiguration {
+            if scenario != .inferenceSettingsDefaultLight,
+               (frames[providerFooter] == nil ||
+                frames[configureInference] == nil) {
+                failures.append("provider footer or action probe is missing")
+            }
+        }
+
+        if scenario != .inferenceSettingsDefaultLight {
+            if frames[gameDetail] == nil {
+                failures.append("game-detail probe is missing")
+            }
+            if frames[board] == nil {
+                failures.append("chess board probe is missing")
+            }
+            if frames[moveHistory] == nil {
+                failures.append("move-history probe is missing")
+            }
+            if frames[coachInspector] == nil {
+                failures.append("Coach inspector probe is missing")
+            }
+            if let navigationFrame = frames[navigation],
+               let gameDetailFrame = frames[gameDetail],
+               overlapsHorizontally(navigationFrame, gameDetailFrame) {
+                failures.append("navigation overlaps game detail")
+            }
+            if let gameDetailFrame = frames[gameDetail],
+               let inspectorFrame = frames[coachInspector],
+               overlapsHorizontally(gameDetailFrame, inspectorFrame) {
+                failures.append("game detail overlaps Coach inspector")
+            }
+            if let boardFrame = frames[board],
+               let moveFrame = frames[moveHistory],
+               boardFrame.intersects(moveFrame) {
+                failures.append("chess board overlaps move history")
+            }
+        }
+
+        if let requested = scenario.requestedInspectorWidth {
+            if let inspectorFrame = frames[coachInspector] {
+                if abs(inspectorFrame.width - requested) > 8 {
+                    failures.append(
+                        "Coach width \(rounded(inspectorFrame.width)) " +
+                            "does not match requested \(rounded(requested))"
+                    )
+                }
+            } else {
+                failures.append("Coach inspector probe is missing")
+            }
+        }
+
+        return failures
+    }
+
+    private static func displayName(_ name: String) -> String {
+        switch name {
+        case gameDetail:
+            "game detail"
+        case coachInspector:
+            "Coach inspector"
+        case providerFooter:
+            "provider footer"
+        default:
+            name
+        }
+    }
+
+    private static func contains(
+        _ owner: CGRect,
+        _ child: CGRect,
+        tolerance: CGFloat
+    ) -> Bool {
+        owner.insetBy(dx: -tolerance, dy: -tolerance).contains(child)
+    }
+
+    private static func overlapsHorizontally(
+        _ lhs: CGRect,
+        _ rhs: CGRect
+    ) -> Bool {
+        lhs.maxX > rhs.minX + 2 && rhs.maxX > lhs.minX + 2
+    }
+
+    private static func rounded(_ value: CGFloat) -> String {
+        String(format: "%.1f", value)
     }
 }
 
@@ -324,6 +704,31 @@ enum ReleaseVisualQARunner {
         let configuration: ReleaseVisualQAConfiguration
         let model: AppModel
         let defaults: UserDefaults
+    }
+
+    private struct InstalledPreferenceSnapshot {
+        let navigationWasExpanded: Bool
+        let inspectorPresented: Any?
+        let inactiveNavigationSelection: Any?
+        let largeText: Any?
+
+        init(
+            defaults: UserDefaults,
+            navigationWasExpanded: Bool
+        ) {
+            self.navigationWasExpanded = navigationWasExpanded
+            inspectorPresented = defaults.object(
+                forKey: "coach.inspector.isPresented"
+            )
+            inactiveNavigationSelection = defaults.object(
+                forKey:
+                    ReleaseVisualQAViewOverrides
+                    .inactiveNavigationSelectionKey
+            )
+            largeText = defaults.object(
+                forKey: ReleaseVisualQAViewOverrides.largeTextKey
+            )
+        }
     }
 
     private static var pendingSession: PendingSession?
@@ -377,26 +782,200 @@ enum ReleaseVisualQARunner {
         let window = try await applicationWindow()
         model.persistence.profile.onboardingComplete = true
         model.persistence.save()
+
+        for otherWindow in NSApplication.shared.windows where
+            otherWindow !== window &&
+                !otherWindow.isSheet &&
+                !(otherWindow is NSPanel) {
+            otherWindow.orderOut(nil)
+        }
+
+        setWindowPresentation(
+            window,
+            scenario: configuration.scenario,
+            mode: configuration.mode
+        )
+        // LaunchServices may start an automated candidate on the Space that
+        // last contained this bundle identifier while leaving another app
+        // frontmost. Put the exact shipping window on the user's active Space
+        // before asking AppKit to activate it. The capture still refuses to
+        // proceed until this real window is both active and key.
+        var collectionBehavior = window.collectionBehavior
+        collectionBehavior.remove(.canJoinAllSpaces)
+        collectionBehavior.insert(.moveToActiveSpace)
+        window.collectionBehavior = collectionBehavior
+        window.orderFrontRegardless()
+        _ = NSRunningApplication.current.activate(
+            options: [.activateAllWindows]
+        )
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        // Allow inspector sizing, vector assets, and the titlebar to finish
+        // their real-window layout before asking for the single foreground
+        // acquisition used by the complete candidate capture session.
+        try await Task.sleep(for: .milliseconds(700))
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        if !NSApplication.shared.isActive || !window.isKeyWindow {
+            ReleaseVisualQAConfiguration.writeError(
+                "Chess Coach visual QA: waiting for the real app window to " +
+                    "become foreground and key; click Chess Coach once to " +
+                    "capture the complete scenario sequence.\n"
+            )
+        }
+        let becameForeground = await wait(timeout: .seconds(60)) {
+            NSApplication.shared.isActive && window.isKeyWindow
+        }
+        guard becameForeground else {
+            throw ReleaseVisualQAError.foregroundCaptureRequired
+        }
+
+        let installedPreferences: InstalledPreferenceSnapshot? = {
+            guard configuration.mode == .installed else { return nil }
+            return InstalledPreferenceSnapshot(
+                defaults: session.defaults,
+                navigationWasExpanded: isNavigationExpanded(in: window)
+            )
+        }()
+        if installedPreferences != nil {
+            // Installed proof must include Coach, but the release gate must not
+            // permanently change whether the user normally keeps it open.
+            session.defaults.set(
+                true,
+                forKey: "coach.inspector.isPresented"
+            )
+        }
+
+        do {
+            for scenario in configuration.scenarios {
+                ReleaseVisualQAConfiguration.writeError(
+                    "Chess Coach visual QA: preparing \(scenario.rawValue).\n"
+                )
+                try await prepare(
+                    scenario: scenario,
+                    model: model,
+                    window: window,
+                    mode: configuration.mode,
+                    defaults: session.defaults
+                )
+                guard NSApplication.shared.isActive, window.isKeyWindow else {
+                    throw ReleaseVisualQAError.foregroundCaptureRequired
+                }
+                try capture(
+                    window: window,
+                    configuration: configuration,
+                    scenario: scenario
+                )
+            }
+        } catch {
+            if let installedPreferences {
+                try? await restoreInstalledPreferences(
+                    installedPreferences,
+                    defaults: session.defaults,
+                    window: window
+                )
+            }
+            throw error
+        }
+
+        if let installedPreferences {
+            try await restoreInstalledPreferences(
+                installedPreferences,
+                defaults: session.defaults,
+                window: window
+            )
+        }
+    }
+
+    @MainActor
+    private static func restoreInstalledPreferences(
+        _ snapshot: InstalledPreferenceSnapshot,
+        defaults: UserDefaults,
+        window: NSWindow
+    ) async throws {
+        restoreDefault(
+            snapshot.inspectorPresented,
+            key: "coach.inspector.isPresented",
+            defaults: defaults
+        )
+        restoreDefault(
+            snapshot.inactiveNavigationSelection,
+            key:
+                ReleaseVisualQAViewOverrides
+                .inactiveNavigationSelectionKey,
+            defaults: defaults
+        )
+        restoreDefault(
+            snapshot.largeText,
+            key: ReleaseVisualQAViewOverrides.largeTextKey,
+            defaults: defaults
+        )
+        try await setNavigationVisibility(
+            expanded: snapshot.navigationWasExpanded,
+            window: window,
+            cycleBeforeExpanding: false
+        )
+    }
+
+    private static func restoreDefault(
+        _ value: Any?,
+        key: String,
+        defaults: UserDefaults
+    ) {
+        if let value {
+            defaults.set(value, forKey: key)
+        } else {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
+    @MainActor
+    private static func prepare(
+        scenario: ReleaseVisualQAConfiguration.Scenario,
+        model: AppModel,
+        window: NSWindow,
+        mode: ReleaseVisualQAConfiguration.Mode,
+        defaults: UserDefaults
+    ) async throws {
+        defaults.set(
+            scenario.usesInactiveNavigationSelection,
+            forKey:
+                ReleaseVisualQAViewOverrides
+                .inactiveNavigationSelectionKey
+        )
+        defaults.set(
+            scenario.usesLargeText,
+            forKey: ReleaseVisualQAViewOverrides.largeTextKey
+        )
+        setWindowPresentation(window, scenario: scenario, mode: mode)
+        configureInference(for: scenario, model: model)
         model.selection = .currentGame
-        let timeControl: TimeControl =
-            configuration.scenario == .lessonClockedDefaultDark
-                ? .rapid10
-                : .none
         model.coordinator.newGame(
             NewGameConfiguration(
                 colorChoice: .white,
                 difficulty: 3,
-                timeControl: timeControl,
+                timeControl: scenario == .lessonClockedDefaultDark
+                    ? .rapid10
+                    : .none,
                 blunderGuardEnabled: false
             )
         )
 
-        switch configuration.scenario {
+        switch scenario {
         case .freshDefaultDark,
              .freshCompactDark,
              .freshDefaultLight,
              .sidebarCollapsedDefaultDark,
+             .sidebarRestoredExpandedDefaultLight,
+             .sidebarMinimumWidthDefaultLight,
+             .sidebarMaximumWidthDefaultLight,
+             .sidebarInactiveSelectionDefaultLight,
+             .sidebarInactiveSelectionDefaultDark,
              .missingInferenceKeyDefaultLight,
+             .missingInferenceKeyMinimumInspectorLight,
+             .missingInferenceKeyMinimumInspectorLargeTextLight,
+             .missingInferenceKeyMaximumInspectorLight,
              .installedDefaultDark:
             guard await waitForPreparedPosition(model: model) else {
                 throw ReleaseVisualQAError.positionAnalysisTimedOut
@@ -453,14 +1032,65 @@ enum ReleaseVisualQARunner {
             }
         }
 
-        for otherWindow in NSApplication.shared.windows where
-            otherWindow !== window &&
-                !otherWindow.isSheet &&
-                !(otherWindow is NSPanel) {
-            otherWindow.orderOut(nil)
+        try await setNavigationVisibility(
+            expanded: scenario.expectsExpandedNavigation,
+            window: window,
+            cycleBeforeExpanding:
+                scenario == .sidebarRestoredExpandedDefaultLight
+        )
+
+        // Set requested boundary widths only after the scene is present. These
+        // are real NSSplitView dividers owned by the shipping WindowGroup, not
+        // a re-hosted approximation.
+        window.contentView?.layoutSubtreeIfNeeded()
+        if mode == .candidate {
+            if scenario.expectsExpandedNavigation {
+                try setNavigationWidth(
+                    scenario.requestedNavigationWidth ??
+                        AppNavigationSidebarMetrics.idealWidth,
+                    in: window
+                )
+            }
+            try setInspectorWidth(
+                scenario.requestedInspectorWidth ?? 360,
+                in: window
+            )
         }
-        if configuration.mode == .candidate {
-            let targetSize = configuration.scenario.windowSize
+
+        try await Task.sleep(for: .milliseconds(700))
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.contentView?.superview?.layoutSubtreeIfNeeded()
+        if scenario == .inferenceSettingsDefaultLight {
+            try exerciseInferenceKeyField(in: window)
+            // A render invalidation spin blocks this main-actor suspension from
+            // resuming. The external session timeout then fails the release.
+            try await Task.sleep(for: .seconds(5))
+            window.contentView?.layoutSubtreeIfNeeded()
+        }
+    }
+
+    @MainActor
+    private static func configureInference(
+        for scenario: ReleaseVisualQAConfiguration.Scenario,
+        model: AppModel
+    ) {
+        model.inferenceSettings.modelID = "visual-qa-model"
+        if scenario.exercisesMissingInferenceConfiguration {
+            model.inferenceSettings.provider = .openAI
+        } else {
+            model.inferenceSettings.customEndpoint = "http://127.0.0.1:9"
+            model.inferenceSettings.provider = .customOpenAICompatible
+        }
+    }
+
+    @MainActor
+    private static func setWindowPresentation(
+        _ window: NSWindow,
+        scenario: ReleaseVisualQAConfiguration.Scenario,
+        mode: ReleaseVisualQAConfiguration.Mode
+    ) {
+        if mode == .candidate {
+            let targetSize = scenario.windowSize
             let visibleFrame = NSScreen.main?.visibleFrame ?? window.frame
             let targetFrame = NSRect(
                 x: visibleFrame.midX - targetSize.width / 2,
@@ -471,51 +1101,124 @@ enum ReleaseVisualQARunner {
             window.setFrame(targetFrame, display: true)
         }
         window.appearance = NSAppearance(
-            named: configuration.scenario.colorScheme == .dark
-                ? .darkAqua
-                : .aqua
+            named: scenario.colorScheme == .dark ? .darkAqua : .aqua
         )
-        // LaunchServices may start an automated candidate on the Space that
-        // last contained this bundle identifier while leaving another app
-        // frontmost. Put the exact shipping window on the user's active Space
-        // before asking AppKit to activate it. The capture still refuses to
-        // proceed until this real window is both active and key.
-        var collectionBehavior = window.collectionBehavior
-        collectionBehavior.remove(.canJoinAllSpaces)
-        collectionBehavior.insert(.moveToActiveSpace)
-        window.collectionBehavior = collectionBehavior
-        window.orderFrontRegardless()
-        _ = NSRunningApplication.current.activate(
-            options: [.activateAllWindows]
-        )
-        window.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
+    }
 
-        // Allow inspector sizing, vector assets, and the titlebar to finish
-        // their real-window layout before freezing the release artifact.
-        try await Task.sleep(for: .milliseconds(700))
+    @MainActor
+    private static func setNavigationVisibility(
+        expanded: Bool,
+        window: NSWindow,
+        cycleBeforeExpanding: Bool
+    ) async throws {
         window.contentView?.layoutSubtreeIfNeeded()
-        window.contentView?.superview?.layoutSubtreeIfNeeded()
-        if configuration.scenario == .inferenceSettingsDefaultLight {
-            try exerciseInferenceKeyField(in: window)
-            // A render invalidation spin blocks this main-actor suspension from
-            // resuming. The external scenario timeout then fails the release.
-            try await Task.sleep(for: .seconds(5))
-            window.contentView?.layoutSubtreeIfNeeded()
+        if cycleBeforeExpanding, isNavigationExpanded(in: window) {
+            try await toggleNavigationSidebar(in: window)
         }
-        if !NSApplication.shared.isActive || !window.isKeyWindow {
-            ReleaseVisualQAConfiguration.writeError(
-                "Chess Coach visual QA: waiting for the real app window to " +
-                    "become foreground and key; click Chess Coach now.\n"
+        if isNavigationExpanded(in: window) != expanded {
+            try await toggleNavigationSidebar(in: window)
+        }
+        guard isNavigationExpanded(in: window) == expanded else {
+            throw ReleaseVisualQAError.layoutProbeUnavailable(
+                expanded ? "expanded navigation" : "collapsed navigation"
             )
         }
-        let becameForeground = await wait(timeout: .seconds(20)) {
-            NSApplication.shared.isActive && window.isKeyWindow
+    }
+
+    @MainActor
+    private static func toggleNavigationSidebar(
+        in window: NSWindow
+    ) async throws {
+        window.makeFirstResponder(window.contentView)
+        let priorState = isNavigationExpanded(in: window)
+        let sent = NSApplication.shared.sendAction(
+            #selector(NSSplitViewController.toggleSidebar(_:)),
+            to: nil,
+            from: nil
+        )
+        guard sent else {
+            throw ReleaseVisualQAError.splitViewUnavailable(
+                "navigation"
+            )
         }
-        guard becameForeground else {
-            throw ReleaseVisualQAError.foregroundCaptureRequired
+        let changed = await wait(timeout: .seconds(3)) {
+            window.contentView?.layoutSubtreeIfNeeded()
+            return isNavigationExpanded(in: window) != priorState
         }
-        try capture(window: window, configuration: configuration)
+        guard changed else {
+            throw ReleaseVisualQAError.splitViewUnavailable(
+                "navigation"
+            )
+        }
+    }
+
+    @MainActor
+    private static func isNavigationExpanded(in window: NSWindow) -> Bool {
+        accessibilityFrame(
+            identifier: "app-navigation-column",
+            in: window
+        ).map { $0.width > 20 && $0.height > 100 } ?? false
+    }
+
+    @MainActor
+    private static func setNavigationWidth(
+        _ width: CGFloat,
+        in window: NSWindow
+    ) throws {
+        guard let splitView = splitViewCandidates(in: window)
+            .filter({ $0.isVertical && $0.subviews.count >= 2 })
+            .min(by: {
+                abs($0.subviews[0].frame.width - 220) <
+                    abs($1.subviews[0].frame.width - 220)
+            })
+        else {
+            throw ReleaseVisualQAError.splitViewUnavailable("navigation")
+        }
+        splitView.setPosition(width, ofDividerAt: 0)
+        splitView.adjustSubviews()
+        splitView.layoutSubtreeIfNeeded()
+    }
+
+    @MainActor
+    private static func setInspectorWidth(
+        _ width: CGFloat,
+        in window: NSWindow
+    ) throws {
+        guard let splitView = splitViewCandidates(in: window)
+            .filter({ splitView in
+                    splitView.isVertical &&
+                    splitView.subviews.count >= 2 &&
+                    splitView.subviews.last.map {
+                        (CGFloat(250)...CGFloat(520))
+                            .contains($0.frame.width)
+                    } == true
+            })
+            .min(by: {
+                let lhs = abs(($0.subviews.last?.frame.width ?? 0) - 360)
+                let rhs = abs(($1.subviews.last?.frame.width ?? 0) - 360)
+                return lhs < rhs
+            })
+        else {
+            throw ReleaseVisualQAError.splitViewUnavailable("Coach inspector")
+        }
+        splitView.setPosition(
+            splitView.bounds.width - width,
+            ofDividerAt: splitView.subviews.count - 2
+        )
+        splitView.adjustSubviews()
+        splitView.layoutSubtreeIfNeeded()
+    }
+
+    @MainActor
+    private static func splitViewCandidates(
+        in window: NSWindow
+    ) -> [NSSplitView] {
+        guard let contentView = window.contentView else { return [] }
+        return allSubviews(in: contentView).compactMap { $0 as? NSSplitView }
+    }
+
+    private static func allSubviews(in view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap { allSubviews(in: $0) }
     }
 
     @MainActor
@@ -664,14 +1367,289 @@ enum ReleaseVisualQARunner {
         return nil
     }
 
+    private struct AccessibilitySnapshot {
+        let identifier: String?
+        let label: String?
+        let frame: CGRect
+    }
+
+    @MainActor
+    private static func accessibilityFrame(
+        identifier: String,
+        in window: NSWindow
+    ) -> CGRect? {
+        accessibilitySnapshots(in: window)
+            .filter { $0.identifier == identifier && isUsable($0.frame) }
+            .max { lhs, rhs in
+                lhs.frame.width * lhs.frame.height <
+                    rhs.frame.width * rhs.frame.height
+            }?
+            .frame
+    }
+
+    @MainActor
+    private static func accessibilityFrame(
+        labelPrefix: String,
+        in window: NSWindow
+    ) -> CGRect? {
+        accessibilitySnapshots(in: window)
+            .filter {
+                $0.label?.lowercased().hasPrefix(labelPrefix.lowercased()) ==
+                    true && isUsable($0.frame)
+            }
+            .max { lhs, rhs in
+                lhs.frame.width * lhs.frame.height <
+                    rhs.frame.width * rhs.frame.height
+            }?
+            .frame
+    }
+
+    @MainActor
+    private static func accessibilitySnapshots(
+        in window: NSWindow
+    ) -> [AccessibilitySnapshot] {
+        guard let contentView = window.contentView else { return [] }
+        var snapshots: [AccessibilitySnapshot] = []
+        var visited: Set<ObjectIdentifier> = []
+
+        func visit(_ value: Any) {
+            guard let object = value as AnyObject? else { return }
+            let identity = ObjectIdentifier(object)
+            guard visited.insert(identity).inserted else { return }
+
+            if let view = value as? NSView {
+                snapshots.append(
+                    AccessibilitySnapshot(
+                        identifier: view.accessibilityIdentifier(),
+                        label: view.accessibilityLabel(),
+                        frame: view.accessibilityFrame()
+                    )
+                )
+                for child in view.accessibilityChildren() ?? [] {
+                    visit(child)
+                }
+                for subview in view.subviews {
+                    visit(subview)
+                }
+                return
+            }
+
+            if let element = value as? NSAccessibilityElement {
+                snapshots.append(
+                    AccessibilitySnapshot(
+                        identifier: element.accessibilityIdentifier(),
+                        label: element.accessibilityLabel(),
+                        frame: element.accessibilityFrame()
+                    )
+                )
+                for child in element.accessibilityChildren() ?? [] {
+                    visit(child)
+                }
+            }
+        }
+
+        visit(contentView)
+        return snapshots
+    }
+
+    private static func isUsable(_ frame: CGRect) -> Bool {
+        frame.origin.x.isFinite &&
+            frame.origin.y.isFinite &&
+            frame.width.isFinite &&
+            frame.height.isFinite &&
+            frame.width > 0 &&
+            frame.height > 0
+    }
+
+    @MainActor
+    private static func splitPaneFrame(
+        edge: NSRectEdge,
+        expectedWidth: ClosedRange<CGFloat>,
+        in window: NSWindow
+    ) -> CGRect? {
+        let panes = splitViewCandidates(in: window)
+            .filter { $0.isVertical && $0.subviews.count >= 2 }
+            .compactMap { splitView -> (NSView, CGFloat)? in
+                let pane: NSView
+                switch edge {
+                case .minX:
+                    pane = splitView.subviews[0]
+                case .maxX:
+                    guard let last = splitView.subviews.last else {
+                        return nil
+                    }
+                    pane = last
+                default:
+                    return nil
+                }
+                guard expectedWidth.contains(pane.frame.width),
+                      pane.frame.height > 500
+                else {
+                    return nil
+                }
+                let ideal: CGFloat = edge == .minX ? 220 : 360
+                return (pane, abs(pane.frame.width - ideal))
+            }
+            .sorted { $0.1 < $1.1 }
+
+        guard let pane = panes.first?.0 else { return nil }
+        let frameInWindow = pane.convert(pane.bounds, to: nil)
+        return window.convertToScreen(frameInWindow)
+    }
+
+    @MainActor
+    private static func gameDetailFrame(in window: NSWindow) -> CGRect? {
+        if let accessibilityFrame = accessibilityFrame(
+            identifier: "app-game-detail-column",
+            in: window
+        ) {
+            return accessibilityFrame
+        }
+
+        // `NavigationSplitView` is nested inside the inspector split. The
+        // detail pane is the smallest full-height wide pane; the larger
+        // candidate is the outer main-content pane that still includes the
+        // navigation column.
+        let panes = splitViewCandidates(in: window)
+            .filter { $0.isVertical && $0.subviews.count >= 2 }
+            .flatMap(\.subviews)
+            .filter {
+                $0.frame.width >= 600 &&
+                    $0.frame.width <= 1_200 &&
+                    $0.frame.height > 500
+            }
+            .sorted { $0.frame.width < $1.frame.width }
+        guard let pane = panes.first else { return nil }
+        return window.convertToScreen(pane.convert(pane.bounds, to: nil))
+    }
+
+    @MainActor
+    private static func layoutEvidence(
+        window: NSWindow,
+        scenario: ReleaseVisualQAConfiguration.Scenario
+    ) throws -> ReleaseVisualQALayoutEvidence {
+        var probes: [ReleaseVisualQALayoutProbe] = [
+            ReleaseVisualQALayoutProbe(
+                name: ReleaseVisualQALayoutValidator.window,
+                owner: "",
+                frame: ReleaseVisualQARect(window.frame)
+            )
+        ]
+
+        func append(
+            _ name: String,
+            owner: String,
+            frame: CGRect?
+        ) {
+            guard let frame, isUsable(frame) else { return }
+            probes.append(
+                ReleaseVisualQALayoutProbe(
+                    name: name,
+                    owner: owner,
+                    frame: ReleaseVisualQARect(frame)
+                )
+            )
+        }
+
+        if scenario.expectsExpandedNavigation {
+            append(
+                ReleaseVisualQALayoutValidator.navigation,
+                owner: ReleaseVisualQALayoutValidator.window,
+                frame: accessibilityFrame(
+                    identifier: "app-navigation-column",
+                    in: window
+                ) ?? splitPaneFrame(
+                    edge: .minX,
+                    expectedWidth: 150...300,
+                    in: window
+                )
+            )
+            for section in AppSection.allCases {
+                append(
+                    "navigation-\(section.rawValue)",
+                    owner: ReleaseVisualQALayoutValidator.navigation,
+                    frame: accessibilityFrame(
+                        identifier: "app-navigation-\(section.rawValue)",
+                        in: window
+                    )
+                )
+            }
+        }
+        append(
+            ReleaseVisualQALayoutValidator.gameDetail,
+            owner: ReleaseVisualQALayoutValidator.window,
+            frame: gameDetailFrame(in: window)
+        )
+        append(
+            ReleaseVisualQALayoutValidator.coachInspector,
+            owner: ReleaseVisualQALayoutValidator.window,
+            frame: splitPaneFrame(
+                edge: .maxX,
+                expectedWidth: 250...520,
+                in: window
+            )
+        )
+        append(
+            ReleaseVisualQALayoutValidator.board,
+            owner: ReleaseVisualQALayoutValidator.gameDetail,
+            frame: accessibilityFrame(
+                labelPrefix: "Chess board",
+                in: window
+            )
+        )
+        append(
+            ReleaseVisualQALayoutValidator.moveHistory,
+            owner: ReleaseVisualQALayoutValidator.gameDetail,
+            frame: accessibilityFrame(
+                labelPrefix: "Move history",
+                in: window
+            )
+        )
+        append(
+            ReleaseVisualQALayoutValidator.providerFooter,
+            owner: ReleaseVisualQALayoutValidator.coachInspector,
+            frame: accessibilityFrame(
+                identifier: "coach-provider-setup",
+                in: window
+            )
+        )
+        append(
+            ReleaseVisualQALayoutValidator.configureInference,
+            owner: ReleaseVisualQALayoutValidator.providerFooter,
+            frame: accessibilityFrame(
+                identifier: "configure-inference",
+                in: window
+            )
+        )
+
+        let failures = ReleaseVisualQALayoutValidator.failures(
+            probes: probes,
+            scenario: scenario
+        )
+        guard failures.isEmpty else {
+            throw ReleaseVisualQAError.invalidLayout(failures)
+        }
+        return ReleaseVisualQALayoutEvidence(
+            coordinateSpace: "screen-points",
+            requestedNavigationWidth:
+                scenario.requestedNavigationWidth.map(Double.init),
+            requestedInspectorWidth:
+                scenario.requestedInspectorWidth.map(Double.init),
+            probes: probes.sorted { $0.name < $1.name },
+            validation: "passed"
+        )
+    }
+
     @MainActor
     private static func capture(
         window: NSWindow,
-        configuration: ReleaseVisualQAConfiguration
+        configuration: ReleaseVisualQAConfiguration,
+        scenario: ReleaseVisualQAConfiguration.Scenario
     ) throws {
         window.displayIfNeeded()
         window.contentView?.displayIfNeeded()
         CATransaction.flush()
+        let layout = try layoutEvidence(window: window, scenario: scenario)
         ReleaseVisualQAConfiguration.writeError(
             "Chess Coach visual QA: capturing window " +
                 "\(window.windowNumber), frame \(NSStringFromRect(window.frame)), " +
@@ -721,14 +1699,14 @@ enum ReleaseVisualQARunner {
             at: configuration.outputDirectory,
             withIntermediateDirectories: true
         )
-        let imageName = "\(configuration.scenario.rawValue).png"
+        let imageName = "\(scenario.rawValue).png"
         let imageURL = configuration.outputDirectory
             .appendingPathComponent(imageName)
         try png.write(to: imageURL, options: .atomic)
 
         let bundle = Bundle.main
         let metadata = ReleaseVisualQAMetadata(
-            scenario: configuration.scenario.rawValue,
+            scenario: scenario.rawValue,
             // Candidate and installed proof are deliberately distinct release
             // artifacts even though both capture the shipping WindowGroup.
             captureKind: configuration.captureKind,
@@ -741,14 +1719,15 @@ enum ReleaseVisualQARunner {
                 forInfoDictionaryKey: "CFBundleVersion"
             ) as? String ?? "",
             pixelWidth: bitmap.pixelsWide,
-            pixelHeight: bitmap.pixelsHigh
+            pixelHeight: bitmap.pixelsHigh,
+            layout: layout
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(metadata)
         let metadataURL = configuration.outputDirectory
             .appendingPathComponent(
-                "\(configuration.scenario.rawValue).json"
+                "\(scenario.rawValue).json"
             )
         try data.write(to: metadataURL, options: .atomic)
     }
@@ -763,4 +1742,5 @@ private struct ReleaseVisualQAMetadata: Encodable {
     let appBuild: String
     let pixelWidth: Int
     let pixelHeight: Int
+    let layout: ReleaseVisualQALayoutEvidence
 }

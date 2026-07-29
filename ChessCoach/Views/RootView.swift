@@ -2,6 +2,10 @@ import SwiftUI
 
 struct RootView: View {
     @Bindable var model: AppModel
+    @Environment(\.controlActiveState)
+    private var inheritedControlActiveState
+    @Environment(\.dynamicTypeSize)
+    private var inheritedDynamicTypeSize
     @State private var showingThirdPartyNotices = false
     @SceneStorage(ChessCoachWindowLayout.sidebarVisibilitySceneKey)
     private var navigationSidebarVisibilityRaw =
@@ -10,12 +14,24 @@ struct RootView: View {
     private var navigationSidebarVisibilityLaunchOverride = ""
     @AppStorage("coach.inspector.isPresented")
     private var isCoachInspectorPresented = true
+    @AppStorage(
+        ReleaseVisualQAViewOverrides.inactiveNavigationSelectionKey
+    )
+    private var visualQAUsesInactiveNavigationSelection = false
+    @AppStorage(ReleaseVisualQAViewOverrides.largeTextKey)
+    private var visualQAUsesLargeText = false
 
     var body: some View {
         NavigationSplitView(
             columnVisibility: navigationColumnVisibility
         ) {
             AppNavigationSidebar(selection: $model.selection)
+                .environment(
+                    \.controlActiveState,
+                    visualQAUsesInactiveNavigationSelection
+                        ? .inactive
+                        : inheritedControlActiveState
+                )
                 .navigationSplitViewColumnWidth(
                     min: AppNavigationSidebarMetrics.minimumWidth,
                     ideal: AppNavigationSidebarMetrics.idealWidth,
@@ -27,6 +43,7 @@ struct RootView: View {
                 content
                     .frame(minWidth: 620)
             }
+            .accessibilityIdentifier("app-game-detail-column")
             .background {
                 Color(nsColor: .windowBackgroundColor)
                     .backgroundExtensionEffect()
@@ -98,6 +115,12 @@ struct RootView: View {
         .sheet(isPresented: $showingThirdPartyNotices) {
             ThirdPartyNoticesView()
         }
+        .environment(
+            \.dynamicTypeSize,
+            visualQAUsesLargeText
+                ? .accessibility1
+                : inheritedDynamicTypeSize
+        )
     }
 
     private var navigationColumnVisibility:

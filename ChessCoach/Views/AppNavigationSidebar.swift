@@ -1,39 +1,60 @@
 import SwiftUI
 
+/// The app has five fixed destinations, so its primary navigation must not
+/// live in a scroll-backed `List`. A sidebar list can retain a horizontal
+/// clip-view offset after window restoration, hiding its leading content.
+///
+/// `NavigationSplitView` still owns the native sidebar column, its material,
+/// and collapse behavior. Only the fixed navigation contents avoid scrolling.
 struct AppNavigationSidebar: View {
     @Binding var selection: AppSection
 
     var body: some View {
         VStack(spacing: 0) {
-            List(selection: $selection) {
+            VStack(spacing: 2) {
                 ForEach(AppNavigationSidebarSections.primary) { section in
-                    Label(section.title, systemImage: section.systemImage)
-                        .lineLimit(1)
-                        .tag(section)
-                        .accessibilityIdentifier(
-                            "app-navigation-\(section.rawValue)"
-                        )
+                    navigationButton(for: section)
                 }
             }
-            .listStyle(.sidebar)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
 
-            List(selection: $selection) {
-                Label(
-                    AppSection.settings.title,
-                    systemImage: AppSection.settings.systemImage
-                )
-                .lineLimit(1)
-                .tag(AppSection.settings)
-                .accessibilityIdentifier("app-navigation-settings")
-            }
-            .listStyle(.sidebar)
-            .scrollDisabled(true)
-            .frame(height: 46)
+            Spacer(minLength: 8)
+
+            navigationButton(for: .settings)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 10)
         }
         .frame(
             maxWidth: .infinity,
             maxHeight: .infinity,
             alignment: .topLeading
+        )
+    }
+
+    private func navigationButton(for section: AppSection) -> some View {
+        Button {
+            selection = section
+        } label: {
+            Label(section.title, systemImage: section.systemImage)
+                .lineLimit(1)
+                .frame(
+                    maxWidth: .infinity,
+                    minHeight: 30,
+                    alignment: .leading
+                )
+                .contentShape(.rect)
+        }
+        .buttonStyle(
+            AppNavigationRowButtonStyle(
+                isSelected: selection == section
+            )
+        )
+        .accessibilityAddTraits(
+            selection == section ? .isSelected : []
+        )
+        .accessibilityIdentifier(
+            "app-navigation-\(section.rawValue)"
         )
     }
 }
@@ -81,7 +102,7 @@ enum ChessCoachWindowLayout {
         "layout.navigationSidebar.visibilityLaunchOverride"
 
     private static let splitViewRepairKey =
-        "layout.sidebarNavigationSplitViewRepair.v2"
+        "layout.sidebarNavigationSplitViewRepair.v3"
 
     static func prepareForLaunch(
         defaults: UserDefaults = .standard,
@@ -100,5 +121,40 @@ enum ChessCoachWindowLayout {
             defaults.removeObject(forKey: key)
         }
         defaults.set(true, forKey: splitViewRepairKey)
+    }
+}
+
+private struct AppNavigationRowButtonStyle: ButtonStyle {
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .padding(.horizontal, 10)
+            .foregroundStyle(foregroundStyle)
+            .background {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(selectionBackground)
+                } else if configuration.isPressed {
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(.primary.opacity(0.08))
+                }
+            }
+    }
+
+    private var foregroundStyle: Color {
+        guard isSelected else { return .primary }
+        return controlActiveState == .inactive ? .primary : .white
+    }
+
+    private var selectionBackground: Color {
+        if controlActiveState == .inactive {
+            return Color(
+                nsColor: .unemphasizedSelectedContentBackgroundColor
+            )
+        }
+        return .accentColor
     }
 }

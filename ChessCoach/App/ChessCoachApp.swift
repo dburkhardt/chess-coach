@@ -5,6 +5,7 @@ import SwiftUI
 struct ChessCoachApp: App {
     @State private var model: AppModel
     private let visualQAConfiguration: ReleaseVisualQAConfiguration?
+    private let launchMode: ReleaseLaunchMode
     private let appDefaults: UserDefaults
     @AppStorage("coach.inspector.isPresented")
     private var isCoachInspectorPresented = true
@@ -12,11 +13,22 @@ struct ChessCoachApp: App {
     init() {
         InstalledCredentialRuntimeProbe.runIfRequested()
 
+        let launchMode = ReleaseLaunchMode.current
+        ReleaseLaunchMode.enforceCandidateLaunchPolicy(launchMode)
+        self.launchMode = launchMode
+
         let visualQAConfiguration = ReleaseVisualQAConfiguration.current
         self.visualQAConfiguration = visualQAConfiguration
 
-        let appDefaults =
-            visualQAConfiguration?.appDefaults ?? UserDefaults.standard
+        let candidateIdentity: ReleaseCandidateIdentity? = {
+            guard case .candidatePreview(let identity) = launchMode else {
+                return nil
+            }
+            return identity
+        }()
+        let appDefaults = visualQAConfiguration?.appDefaults ??
+            candidateIdentity.map(Self.makeCandidatePreviewDefaults) ??
+            UserDefaults.standard
         self.appDefaults = appDefaults
         ChessCoachWindowLayout.prepareForLaunch(defaults: appDefaults)
         _isCoachInspectorPresented = AppStorage(
@@ -25,16 +37,33 @@ struct ChessCoachApp: App {
             store: appDefaults
         )
 
+        let inferenceDefaults = visualQAConfiguration?.makeInferenceDefaults() ??
+            candidateIdentity.map(Self.makeCandidatePreviewInferenceDefaults) ??
+            .standard
+        let credentialStore: (any KeychainStoring)? =
+            visualQAConfiguration?.makeCredentialStore() ??
+            (candidateIdentity == nil
+                ? nil
+                : CandidatePreviewCredentialStore())
         let model = AppModel(
-            inMemory: visualQAConfiguration != nil,
-            inferenceDefaults:
-                visualQAConfiguration?.makeInferenceDefaults() ?? .standard,
-            credentialStore: visualQAConfiguration?.makeCredentialStore()
+            inMemory: visualQAConfiguration != nil || candidateIdentity != nil,
+            inferenceDefaults: inferenceDefaults,
+            credentialStore: credentialStore
         )
-        if visualQAConfiguration != nil {
+        if visualQAConfiguration != nil || candidateIdentity != nil {
             model.persistence.profile.onboardingComplete = true
             model.persistence.save()
             model.selection = .currentGame
+        }
+        if candidateIdentity != nil {
+            model.coordinator.newGame(
+                NewGameConfiguration(
+                    colorChoice: .white,
+                    difficulty: 3,
+                    timeControl: .none,
+                    blunderGuardEnabled: false
+                )
+            )
         }
         _model = State(initialValue: model)
 
@@ -91,22 +120,84 @@ struct ChessCoachApp: App {
 
     @ViewBuilder
     private var rootContent: some View {
-        let root = RootView(model: model)
+        let root = Group {
+            if case .candidatePreview(let identity) = launchMode {
+                VStack(spacing: 0) {
+                    ReleaseCandidatePreviewBanner(identity: identity)
+                    RootView(model: model)
+                }
+            } else {
+                RootView(model: model)
+            }
+        }
             .environment(model)
             .modelContainer(model.persistence.container)
             .defaultAppStorage(appDefaults)
             .frame(minWidth: 980, minHeight: 760)
 
         if let visualQAConfiguration {
-            root
-                .preferredColorScheme(
-                    visualQAConfiguration.scenario.colorScheme
-                )
-                .onAppear {
-                    ReleaseVisualQARunner.shippingRootDidAppear()
-                }
+            if visualQAConfiguration.scenarios.count == 1 {
+                root
+                    .preferredColorScheme(
+                        visualQAConfiguration.scenario.colorScheme
+                    )
+                    .onAppear {
+                        ReleaseVisualQARunner.shippingRootDidAppear()
+                    }
+            } else {
+                // The one-process release harness changes the real AppKit
+                // window appearance before each scenario. Pinning SwiftUI to
+                // the first scenario here would make later light/dark
+                // captures dishonest.
+                root
+                    .onAppear {
+                        ReleaseVisualQARunner.shippingRootDidAppear()
+                    }
+            }
         } else {
             root
         }
+    }
+
+    @MainActor
+    private static func makeCandidatePreviewDefaults(
+        identity: ReleaseCandidateIdentity
+    ) -> UserDefaults {
+        let suiteName =
+            "com.dburkhardt.chesscoach.candidate-preview.\(identity.commit)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            ReleaseLaunchMode.failCandidatePreviewIsolation()
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(true, forKey: "coach.inspector.isPresented")
+        defaults.set("Merida", forKey: "chessboard.pieceStyle")
+        defaults.set(true, forKey: "chessboard.showCoordinates")
+        defaults.set(true, forKey: "chessboard.showLegalMoves")
+        defaults.set(
+            AppNavigationSidebarVisibility.expanded.rawValue,
+            forKey: ChessCoachWindowLayout
+                .sidebarVisibilityLaunchOverrideKey
+        )
+        return defaults
+    }
+
+    @MainActor
+    private static func makeCandidatePreviewInferenceDefaults(
+        identity: ReleaseCandidateIdentity
+    ) -> UserDefaults {
+        let suiteName =
+            "com.dburkhardt.chesscoach.candidate-preview.inference." +
+            identity.commit
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            ReleaseLaunchMode.failCandidatePreviewIsolation()
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defaults.set(
+            InferenceProviderKind.customOpenAICompatible.rawValue,
+            forKey: "ai.provider"
+        )
+        defaults.set("http://127.0.0.1:9", forKey: "ai.customEndpoint")
+        defaults.set("candidate-preview", forKey: "ai.modelID")
+        return defaults
     }
 }

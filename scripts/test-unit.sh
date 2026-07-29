@@ -11,6 +11,8 @@ if [[ ! -x "${REPO_DIR}/ChessCoach/Resources/Engines/stockfish" ]]; then
 fi
 
 "${SCRIPT_DIR}/test-graceful-app-quit.sh"
+"${SCRIPT_DIR}/test-release-artifact-lifecycle.sh"
+"${SCRIPT_DIR}/test-github-release-publication.sh"
 
 xcodebuild \
   -project "${REPO_DIR}/ChessCoach.xcodeproj" \

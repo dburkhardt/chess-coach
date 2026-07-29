@@ -2,8 +2,16 @@ fresh-default-dark
 fresh-compact-dark
 fresh-default-light
 sidebar-collapsed-default-dark
+sidebar-restored-expanded-default-light
+sidebar-minimum-width-default-light
+sidebar-maximum-width-default-light
+sidebar-inactive-selection-default-light
+sidebar-inactive-selection-default-dark
 lesson-default-dark
 lesson-clocked-default-dark
 completed-default-dark
 missing-inference-key-default-light
+missing-inference-key-minimum-inspector-light
+missing-inference-key-minimum-inspector-large-text-light
+missing-inference-key-maximum-inspector-light
 inference-settings-default-light
