@@ -20,6 +20,10 @@ struct RootView: View {
     private var visualQAUsesInactiveNavigationSelection = false
     @AppStorage(ReleaseVisualQAViewOverrides.largeTextKey)
     private var visualQAUsesLargeText = false
+    @AppStorage(ReleaseVisualQAViewOverrides.navigationWidthKey)
+    private var visualQANavigationWidth = 0.0
+    @AppStorage(ReleaseVisualQAViewOverrides.inspectorWidthKey)
+    private var visualQAInspectorWidth = 0.0
 
     var body: some View {
         NavigationSplitView(
@@ -33,17 +37,23 @@ struct RootView: View {
                         : inheritedControlActiveState
                 )
                 .navigationSplitViewColumnWidth(
-                    min: AppNavigationSidebarMetrics.minimumWidth,
-                    ideal: AppNavigationSidebarMetrics.idealWidth,
-                    max: AppNavigationSidebarMetrics.maximumWidth
+                    min: navigationWidths.minimum,
+                    ideal: navigationWidths.ideal,
+                    max: navigationWidths.maximum
                 )
                 .accessibilityIdentifier("app-navigation-column")
+                .releaseVisualQAProbe(
+                    ReleaseVisualQALayoutValidator.navigation
+                )
         } detail: {
             NavigationStack {
                 content
                     .frame(minWidth: 620)
             }
             .accessibilityIdentifier("app-game-detail-column")
+            .releaseVisualQAProbe(
+                ReleaseVisualQALayoutValidator.gameDetail
+            )
             .background {
                 Color(nsColor: .windowBackgroundColor)
                     .backgroundExtensionEffect()
@@ -64,7 +74,17 @@ struct RootView: View {
                     )
                 }
             )
-            .inspectorColumnWidth(min: 300, ideal: 360, max: 460)
+            .inspectorColumnWidth(
+                min: inspectorWidths.minimum,
+                ideal: inspectorWidths.ideal,
+                max: inspectorWidths.maximum
+            )
+            .accessibilityIdentifier(
+                CoachInspectorMetrics.accessibilityIdentifier
+            )
+            .releaseVisualQAProbe(
+                ReleaseVisualQALayoutValidator.coachInspector
+            )
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -120,6 +140,22 @@ struct RootView: View {
             visualQAUsesLargeText
                 ? .accessibility1
                 : inheritedDynamicTypeSize
+        )
+    }
+
+    private var navigationWidths: AppColumnWidthRange {
+        AppNavigationSidebarMetrics.widths(
+            visualQAOverride: ReleaseVisualQAConfiguration.isRequested
+                ? visualQANavigationWidth
+                : 0
+        )
+    }
+
+    private var inspectorWidths: AppColumnWidthRange {
+        CoachInspectorMetrics.widths(
+            visualQAOverride: ReleaseVisualQAConfiguration.isRequested
+                ? visualQAInspectorWidth
+                : 0
         )
     }
 

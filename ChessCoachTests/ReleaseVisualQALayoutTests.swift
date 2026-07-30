@@ -239,12 +239,68 @@ struct ReleaseVisualQALayoutTests {
             ),
             encoding: .utf8
         )
+        let installedScript = try String(
+            contentsOf: repository.appendingPathComponent(
+                "scripts/approve-installed-release-visual-qa.sh"
+            ),
+            encoding: .utf8
+        )
+        func openCommands(in source: String) -> [String] {
+            source
+                .split(whereSeparator: \.isNewline)
+                .map {
+                    String($0).trimmingCharacters(in: .whitespaces)
+                }
+                .filter {
+                    $0.hasPrefix("open ") ||
+                        $0.hasPrefix("/usr/bin/open ") ||
+                        $0.hasPrefix("command open ")
+                }
+        }
+        let candidateOpenCommands = openCommands(in: script)
+        let installedOpenCommands = openCommands(in: installedScript)
 
         #expect(script.contains("--scenario-sequence=${scenario_sequence}"))
         #expect(script.contains("--visual-qa-session-id=${CAPTURE_SESSION_ID}"))
         #expect(script.contains("candidate_session_pids()"))
         #expect(script.contains("stop_candidate_session"))
         #expect(!script.contains("run_scenario()"))
+        #expect(
+            candidateOpenCommands == ["open -F -n -W \\"],
+            "Candidate QA must contain exactly one app launch command."
+        )
+        #expect(
+            !script.contains(
+                "open \"${APP_PATH}\""
+            ),
+            "Candidate QA must launch once and never reopen the app."
+        )
+        #expect(
+            script.contains(
+                "Never call `open` again while this session is alive."
+            )
+        )
+        #expect(
+            installedOpenCommands == [
+                "open -n -W \\",
+            ],
+            "Installed QA must launch the app exactly once."
+        )
+        #expect(
+            !installedScript.contains(
+                "open \"${APP_PATH}\""
+            ),
+            "Installed QA must launch once and never reopen the app."
+        )
+        #expect(
+            installedScript.contains(
+                "Never call `open` again while the installed QA session is alive."
+            )
+        )
+        for source in [script, installedScript] {
+            #expect(!source.contains("to activate"))
+            #expect(!source.contains("activate application"))
+        }
         #expect(
             script.contains(
                 "run_capture_session \"${SCENARIO_SEQUENCE}\""
@@ -319,6 +375,12 @@ struct ReleaseVisualQALayoutTests {
             ),
             encoding: .utf8
         )
+        let visualRunner = try String(
+            contentsOf: repository.appendingPathComponent(
+                "ChessCoach/App/ReleaseVisualQA.swift"
+            ),
+            encoding: .utf8
+        )
 
         #expect(
             validator.contains(
@@ -344,6 +406,31 @@ struct ReleaseVisualQALayoutTests {
         #expect(
             rootView.contains(
                 "ReleaseVisualQAViewOverrides.largeTextKey"
+            )
+        )
+        #expect(
+            rootView.contains(
+                "ReleaseVisualQAViewOverrides.navigationWidthKey"
+            )
+        )
+        #expect(
+            rootView.contains(
+                "ReleaseVisualQAViewOverrides.inspectorWidthKey"
+            )
+        )
+        #expect(visualRunner.contains("ReleaseVisualQAProbeRegistry.frame"))
+        #expect(visualRunner.contains("waitForCandidateColumnWidths"))
+        #expect(!visualRunner.contains(".setPosition("))
+        #expect(!visualRunner.contains("NSApplication.shared.activate"))
+        #expect(!visualRunner.contains(".activateAllWindows"))
+        #expect(
+            rootView.contains(
+                "visualQAOverride: ReleaseVisualQAConfiguration.isRequested"
+            )
+        )
+        #expect(
+            visualRunner.contains(
+                "[String: [ReleaseVisualQAWeakProbe]]"
             )
         )
         #expect(rootView.contains(".accessibility1"))

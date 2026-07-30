@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/visual-qa-lib.sh"
+source "${SCRIPT_DIR}/release-gui-session-lib.sh"
 
 APP_PATH=""
 REPLACE=0
@@ -68,7 +69,6 @@ LOG_DIR="${TEMP_DIR}/logs"
 mkdir -p "${CAPTURE_DIR}" "${PROFILE_DIR}" "${LOG_DIR}"
 CAPTURE_SESSION_ID=""
 CAPTURE_OPEN_PID=""
-CAPTURE_ACTIVATION_PID=""
 
 installed_app_pids() {
   pgrep -f '^/Applications/Chess Coach\.app/Contents/MacOS/ChessCoach($| )' || true
@@ -126,20 +126,19 @@ stop_candidate_session() {
 
 cleanup() {
   local original_exit_code=${1:-0}
-  if [[ -n "${CAPTURE_ACTIVATION_PID}" ]]; then
-    kill "${CAPTURE_ACTIVATION_PID}" >/dev/null 2>&1 || true
-    wait "${CAPTURE_ACTIVATION_PID}" >/dev/null 2>&1 || true
-  fi
   if [[ -n "${CAPTURE_OPEN_PID}" ]]; then
     kill "${CAPTURE_OPEN_PID}" >/dev/null 2>&1 || true
     wait "${CAPTURE_OPEN_PID}" >/dev/null 2>&1 || true
   fi
   stop_candidate_session
+  release_gui_session_lock_release
   [[ -d "${TEMP_DIR}" ]] && rm -rf "${TEMP_DIR}"
   trap - EXIT
   exit "${original_exit_code}"
 }
 trap 'cleanup $?' EXIT
+release_gui_session_lock_acquire foreground ||
+  visual_qa_die "Another Chess Coach foreground QA/preview session is active."
 
 if [[ -n "$(installed_app_pids)" ]]; then
   print "Requesting the installed Chess Coach to quit cleanly for visual capture..."
@@ -187,27 +186,14 @@ run_capture_session() {
     "--scenario-sequence=${scenario_sequence}" &
   local process_id=$!
   CAPTURE_OPEN_PID=${process_id}
-  # LaunchServices occasionally creates the requested foreground process
-  # without actually making its window active when this script is run from an
-  # automation host. Re-opening this exact bundle (without `-n`) activates the
-  # already-running candidate; it cannot select an older installed copy
-  # because APP_PATH is absolute and that copy was closed above.
-  (
-    while kill -0 "${process_id}" >/dev/null 2>&1; do
-      sleep 2
-      kill -0 "${process_id}" >/dev/null 2>&1 || exit 0
-      open "${APP_PATH}" >/dev/null 2>&1 || true
-    done
-  ) &
-  local activation_id=$!
-  CAPTURE_ACTIVATION_PID=${activation_id}
+  # Never call `open` again while this session is alive. If LaunchServices did
+  # not foreground the one candidate window, wait passively for the user's
+  # single click. Reopening can steal keyboard focus and create extra
+  # WindowGroup scenes.
   local elapsed=0
 
   while kill -0 "${process_id}" >/dev/null 2>&1; do
     if (( elapsed >= CAPTURE_TIMEOUT_SECONDS )); then
-      kill "${activation_id}" >/dev/null 2>&1 || true
-      wait "${activation_id}" >/dev/null 2>&1 || true
-      CAPTURE_ACTIVATION_PID=""
       stop_candidate_session
       kill "${process_id}" >/dev/null 2>&1 || true
       wait "${process_id}" >/dev/null 2>&1 || true
@@ -221,9 +207,6 @@ run_capture_session() {
     (( elapsed += 1 ))
   done
 
-  kill "${activation_id}" >/dev/null 2>&1 || true
-  wait "${activation_id}" >/dev/null 2>&1 || true
-  CAPTURE_ACTIVATION_PID=""
   if ! wait "${process_id}"; then
     CAPTURE_OPEN_PID=""
     stop_candidate_session

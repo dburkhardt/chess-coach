@@ -61,6 +61,45 @@ struct AppNavigationSidebarTests {
         #expect(!AppNavigationSidebarSections.primary.contains(.settings))
     }
 
+    @Test func visualQAWidthOverridesConstrainOnlySupportedNativeRanges() {
+        #expect(
+            AppNavigationSidebarMetrics.widths(
+                visualQAOverride: 190
+            ) == AppColumnWidthRange(
+                minimum: 190,
+                ideal: 190,
+                maximum: 190
+            )
+        )
+        #expect(
+            AppNavigationSidebarMetrics.widths(
+                visualQAOverride: 0
+            ) == AppColumnWidthRange(
+                minimum: 190,
+                ideal: 220,
+                maximum: 260
+            )
+        )
+        #expect(
+            CoachInspectorMetrics.widths(
+                visualQAOverride: 460
+            ) == AppColumnWidthRange(
+                minimum: 460,
+                ideal: 460,
+                maximum: 460
+            )
+        )
+        #expect(
+            CoachInspectorMetrics.widths(
+                visualQAOverride: 900
+            ) == AppColumnWidthRange(
+                minimum: 300,
+                ideal: 360,
+                maximum: 460
+            )
+        )
+    }
+
     @MainActor
     @Test func sidebarDoesNotCreateScrollBackedNavigation() {
         let selection = SelectionBox(.currentGame)

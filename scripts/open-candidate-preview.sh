@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/release-artifact-lib.sh"
+source "${SCRIPT_DIR}/release-gui-session-lib.sh"
 
 RECEIPT=""
 
@@ -58,10 +59,19 @@ print -u2 "  commit: ${SHORT_COMMIT}"
 print -u2 "  stage: ${STAGE}"
 print -u2 "This preview is isolated and cannot be treated as release acceptance."
 
+cleanup() {
+  release_gui_session_lock_release
+}
+trap cleanup EXIT
+release_gui_session_lock_acquire foreground ||
+  release_artifact_die \
+    "Another Chess Coach foreground QA/preview session is active."
+
 # `-F` starts with fresh AppKit scene state so the same bundle identifier
 # cannot restore the installed app's window/sidebar geometry into this
-# isolated preview.
-open -F -n "${APP_PATH}" --args \
+# isolated preview. `-W` keeps this supervisor and its single-instance lock
+# alive until the preview exits.
+open -F -n -W "${APP_PATH}" --args \
   --candidate-preview \
   "--candidate-receipt=${RECEIPT}" \
   "--candidate-commit=${COMMIT}" \

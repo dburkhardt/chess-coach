@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR=${0:A:h}
 source "${SCRIPT_DIR}/visual-qa-lib.sh"
+source "${SCRIPT_DIR}/release-gui-session-lib.sh"
 
 APP_PATH=""
 EVIDENCE_DIR=""
@@ -21,8 +22,9 @@ using the user's standard window and layout preferences. The app uses an
 in-memory game and an isolated credential store so release QA cannot modify
 saved games or read a credential.
 
-The command validates the pixels, opens the image, and requires a separate
-typed approval before release publication can complete.
+The command validates the pixels, prints the image path, and requires a
+separate typed approval before release publication can complete. It never
+opens another app or steals focus.
 EOF
 }
 
@@ -108,6 +110,7 @@ cleanup() {
     [[ -z "$(pgrep -f "${APP_PID_PATTERN}" || true)" ]] ||
       cleanup_exit_code=1
   fi
+  release_gui_session_lock_release
   rm -rf "${TEMP_DIR}"
   trap - EXIT
   if (( original_exit_code != 0 )); then
@@ -116,6 +119,8 @@ cleanup() {
   exit "${cleanup_exit_code}"
 }
 trap 'cleanup $?' EXIT
+release_gui_session_lock_acquire foreground ||
+  visual_qa_die "Another Chess Coach foreground QA/preview session is active."
 
 # Do not use `open -F`: the post-install gate deliberately allows AppKit to
 # restore the real user's saved window/layout state. The in-app mode isolates
@@ -130,22 +135,13 @@ open -n -W \
   "--output-directory=${CAPTURE_DIR}" \
   "--scenario=${SCENARIO}" &
 OPEN_PID=$!
-# Re-opening this exact installed bundle activates the already-running QA
-# process when an automation host prevented LaunchServices from making it
-# frontmost. Without `-n`, this does not create a second app instance.
-(
-  while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
-    sleep 2
-    kill -0 "${OPEN_PID}" >/dev/null 2>&1 || exit 0
-    open "${APP_PATH}" >/dev/null 2>&1 || true
-  done
-) &
-ACTIVATION_PID=$!
+# Never call `open` again while the installed QA session is alive. If
+# LaunchServices did not foreground the one window, wait passively for the
+# user's single click. Reopening can steal keyboard focus and create extra
+# WindowGroup scenes.
 ELAPSED=0
 while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
   if (( ELAPSED >= CAPTURE_TIMEOUT_SECONDS )); then
-    kill "${ACTIVATION_PID}" >/dev/null 2>&1 || true
-    wait "${ACTIVATION_PID}" >/dev/null 2>&1 || true
     kill "${OPEN_PID}" >/dev/null 2>&1 || true
     wait "${OPEN_PID}" >/dev/null 2>&1 || true
     tail -80 "${STDOUT_PATH}" >&2 || true
@@ -156,8 +152,6 @@ while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
   sleep 1
   (( ELAPSED += 1 ))
 done
-kill "${ACTIVATION_PID}" >/dev/null 2>&1 || true
-wait "${ACTIVATION_PID}" >/dev/null 2>&1 || true
 if ! wait "${OPEN_PID}"; then
   tail -80 "${STDOUT_PATH}" >&2 || true
   tail -80 "${STDERR_PATH}" >&2 || true
@@ -219,10 +213,10 @@ PNG="${INSTALLED_EVIDENCE}/${SCENARIO}.png"
 INSTALLED_MANIFEST="${INSTALLED_EVIDENCE}/manifest.tsv"
 INSTALLED_MANIFEST_SHA=$(visual_qa_sha256 "${INSTALLED_MANIFEST}")
 
-open "${PNG}"
 print
 print "Inspect the exact installed app screenshot:"
 print "  ${PNG}"
+print "Open it manually or render it in Codex before approving."
 print
 print "Confirm the navigation column, game surface, move list, Coach inspector,"
 print "Hint button, and composer are visible, contained, and not clipped."

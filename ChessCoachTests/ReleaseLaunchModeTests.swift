@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ChessCoach
 
@@ -93,5 +94,31 @@ struct ReleaseLaunchModeTests {
 
         try store.delete(account: "provider")
         #expect(try store.read(account: "provider") == nil)
+    }
+
+    @Test func testHostCannotActivateOrShowProductionContent() throws {
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let source = try String(
+            contentsOf: repository.appendingPathComponent(
+                "ChessCoach/App/ChessCoachApp.swift"
+            ),
+            encoding: .utf8
+        )
+
+        #expect(source.contains("if launchMode == .testHost"))
+        #expect(
+            source.contains(
+                "setActivationPolicy(.prohibited)"
+            )
+        )
+        #expect(
+            source.contains(
+                "for window in NSApplication.shared.windows"
+            )
+        )
+        #expect(source.contains("window.orderOut(nil)"))
+        #expect(source.contains("applicationRootContent"))
     }
 }
