@@ -96,7 +96,7 @@ struct ReleaseLaunchModeTests {
         #expect(try store.read(account: "provider") == nil)
     }
 
-    @Test func testHostNeverConstructsTheProductionWindowGroup() throws {
+    @Test func testHostCannotActivateOrShowProductionContent() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -108,11 +108,17 @@ struct ReleaseLaunchModeTests {
         )
 
         #expect(source.contains("if launchMode == .testHost"))
-        #expect(source.contains("Settings {"))
         #expect(
             source.contains(
-                "must never\n            // construct or focus the production WindowGroup"
+                "setActivationPolicy(.prohibited)"
             )
         )
+        #expect(
+            source.contains(
+                "for window in NSApplication.shared.windows"
+            )
+        )
+        #expect(source.contains("window.orderOut(nil)"))
+        #expect(source.contains("applicationRootContent"))
     }
 }

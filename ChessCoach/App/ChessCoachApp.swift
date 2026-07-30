@@ -1,3 +1,4 @@
+import AppKit
 import SwiftData
 import SwiftUI
 
@@ -14,6 +15,12 @@ struct ChessCoachApp: App {
         InstalledCredentialRuntimeProbe.runIfRequested()
 
         let launchMode = ReleaseLaunchMode.current
+        if launchMode == .testHost {
+            // XCTest uses the app executable as a host. It may construct an
+            // empty scene, but it must never activate or focus application
+            // windows on the developer's desktop.
+            _ = NSApplication.shared.setActivationPolicy(.prohibited)
+        }
         ReleaseLaunchMode.enforceCandidateLaunchPolicy(launchMode)
         self.launchMode = launchMode
 
@@ -76,20 +83,7 @@ struct ChessCoachApp: App {
         }
     }
 
-    @SceneBuilder
     var body: some Scene {
-        if launchMode == .testHost {
-            // Unit tests use the app executable as their host, but must never
-            // construct or focus the production WindowGroup.
-            Settings {
-                EmptyView()
-            }
-        } else {
-            appWindowScene
-        }
-    }
-
-    private var appWindowScene: some Scene {
         let _ = visualQAConfiguration.map { _ in
             ReleaseVisualQARunner.noteSceneConstruction()
         }
@@ -133,6 +127,20 @@ struct ChessCoachApp: App {
 
     @ViewBuilder
     private var rootContent: some View {
+        if launchMode == .testHost {
+            EmptyView()
+                .onAppear {
+                    for window in NSApplication.shared.windows {
+                        window.orderOut(nil)
+                    }
+                }
+        } else {
+            applicationRootContent
+        }
+    }
+
+    @ViewBuilder
+    private var applicationRootContent: some View {
         let root = Group {
             if case .candidatePreview(let identity) = launchMode {
                 VStack(spacing: 0) {
