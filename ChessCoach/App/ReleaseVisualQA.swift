@@ -1670,7 +1670,7 @@ enum ReleaseVisualQARunner {
     ) -> CGRect? {
         let panes = splitViewCandidates(in: window)
             .filter { $0.isVertical && $0.subviews.count >= 2 }
-            .flatMap { splitView -> [(NSView, CGFloat)] in
+            .flatMap { splitView -> [(CGRect, CGFloat, CGFloat)] in
                 splitView.subviews.compactMap { pane in
                     guard expectedWidth.contains(pane.frame.width),
                           pane.frame.height > 500
@@ -1690,14 +1690,39 @@ enum ReleaseVisualQARunner {
                     }
                     guard touchesRequestedEdge else { return nil }
                     let ideal: CGFloat = edge == .minX ? 220 : 360
-                    return (pane, abs(pane.frame.width - ideal))
+                    let frameInWindow = pane.convert(pane.bounds, to: nil)
+                    let frameOnScreen = window.convertToScreen(frameInWindow)
+                    let windowEdgeDistance: CGFloat
+                    switch edge {
+                    case .minX:
+                        windowEdgeDistance = abs(
+                            frameOnScreen.minX - window.frame.minX
+                        )
+                    case .maxX:
+                        windowEdgeDistance = abs(
+                            frameOnScreen.maxX - window.frame.maxX
+                        )
+                    default:
+                        return nil
+                    }
+                    // A shipping navigation or inspector pane reaches the
+                    // corresponding outer edge of the real window. Nested
+                    // vertical split views can contain similarly sized panes;
+                    // rejecting those prevents a false "collapsed" reading.
+                    guard windowEdgeDistance <= 12 else { return nil }
+                    return (
+                        frameOnScreen,
+                        abs(pane.frame.width - ideal),
+                        windowEdgeDistance
+                    )
                 }
             }
-            .sorted { $0.1 < $1.1 }
+            .sorted {
+                if $0.2 != $1.2 { return $0.2 < $1.2 }
+                return $0.1 < $1.1
+            }
 
-        guard let pane = panes.first?.0 else { return nil }
-        let frameInWindow = pane.convert(pane.bounds, to: nil)
-        return window.convertToScreen(frameInWindow)
+        return panes.first?.0
     }
 
     @MainActor
