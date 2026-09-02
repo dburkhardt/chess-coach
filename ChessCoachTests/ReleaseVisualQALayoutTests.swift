@@ -418,8 +418,14 @@ struct ReleaseVisualQALayoutTests {
                 "ReleaseVisualQAViewOverrides.inspectorWidthKey"
             )
         )
+        #expect(
+            rootView.contains(
+                "ReleaseVisualQAViewOverrides.navigationExpandedKey"
+            )
+        )
         #expect(visualRunner.contains("ReleaseVisualQAProbeRegistry.frame"))
         #expect(visualRunner.contains("waitForCandidateColumnWidths"))
+        #expect(visualRunner.contains("setCandidateNavigationVisibility"))
         #expect(
             visualRunner.contains(
                 "splitPaneFrame(\n                    edge: .minX"
