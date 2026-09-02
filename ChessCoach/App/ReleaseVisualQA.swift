@@ -862,6 +862,7 @@ extension View {
         if ReleaseVisualQAConfiguration.isRequested {
             background {
                 ReleaseVisualQAProbeRepresentable(name: name)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(false)
             }
         } else {

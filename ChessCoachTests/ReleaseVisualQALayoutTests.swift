@@ -424,6 +424,11 @@ struct ReleaseVisualQALayoutTests {
             )
         )
         #expect(visualRunner.contains("ReleaseVisualQAProbeRegistry.frame"))
+        #expect(
+            visualRunner.contains(
+                ".frame(maxWidth: .infinity, maxHeight: .infinity)"
+            )
+        )
         #expect(visualRunner.contains("waitForCandidateColumnWidths"))
         #expect(visualRunner.contains("setCandidateNavigationVisibility"))
         #expect(visualRunner.contains("firstPlausibleColumnFrame"))
