@@ -426,6 +426,7 @@ struct ReleaseVisualQALayoutTests {
         #expect(visualRunner.contains("ReleaseVisualQAProbeRegistry.frame"))
         #expect(visualRunner.contains("waitForCandidateColumnWidths"))
         #expect(visualRunner.contains("setCandidateNavigationVisibility"))
+        #expect(visualRunner.contains("firstPlausibleColumnFrame"))
         #expect(
             visualRunner.contains(
                 "splitPaneFrame(\n                    edge: .minX"
