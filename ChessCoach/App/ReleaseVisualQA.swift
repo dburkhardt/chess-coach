@@ -1369,20 +1369,7 @@ enum ReleaseVisualQARunner {
 
     @MainActor
     private static func isNavigationExpanded(in window: NSWindow) -> Bool {
-        let frame =
-            ReleaseVisualQAProbeRegistry.frame(
-                named: ReleaseVisualQALayoutValidator.navigation,
-                in: window
-            ) ??
-            accessibilityFrame(
-                identifier: "app-navigation-column",
-                in: window
-            ) ??
-            splitPaneFrame(
-                edge: .minX,
-                expectedWidth: 150...300,
-                in: window
-            )
+        let frame = navigationFrame(in: window)
         guard let frame,
               frame.width > 20,
               frame.height > 100
@@ -1405,39 +1392,13 @@ enum ReleaseVisualQARunner {
             CoachInspectorMetrics.idealWidth
         let adoptedWidths = await wait(timeout: .seconds(3)) {
             window.contentView?.layoutSubtreeIfNeeded()
-            let inspectorWidth =
-                ReleaseVisualQAProbeRegistry.frame(
-                    named: ReleaseVisualQALayoutValidator.coachInspector,
-                    in: window
-                )?.width ??
-                accessibilityFrame(
-                    identifier: CoachInspectorMetrics.accessibilityIdentifier,
-                    in: window
-                )?.width ??
-                splitPaneFrame(
-                    edge: .maxX,
-                    expectedWidth: 250...520,
-                    in: window
-                )?.width
+            let inspectorWidth = inspectorFrame(in: window)?.width
             let inspectorMatches = inspectorWidth.map {
                 abs($0 - requestedInspectorWidth) <= 8
             } ?? false
             guard inspectorMatches else { return false }
             guard scenario.expectsExpandedNavigation else { return true }
-            let navigationWidth =
-                ReleaseVisualQAProbeRegistry.frame(
-                    named: ReleaseVisualQALayoutValidator.navigation,
-                    in: window
-                )?.width ??
-                accessibilityFrame(
-                    identifier: "app-navigation-column",
-                    in: window
-                )?.width ??
-                splitPaneFrame(
-                    edge: .minX,
-                    expectedWidth: 150...300,
-                    in: window
-                )?.width
+            let navigationWidth = navigationFrame(in: window)?.width
             return navigationWidth.map {
                 abs($0 - requestedNavigationWidth) <= 8
             } ?? false
@@ -1740,6 +1701,59 @@ enum ReleaseVisualQARunner {
     }
 
     @MainActor
+    private static func navigationFrame(in window: NSWindow) -> CGRect? {
+        firstPlausibleColumnFrame(
+            [
+                ReleaseVisualQAProbeRegistry.frame(
+                    named: ReleaseVisualQALayoutValidator.navigation,
+                    in: window
+                ),
+                accessibilityFrame(
+                    identifier: "app-navigation-column",
+                    in: window
+                ),
+                splitPaneFrame(
+                    edge: .minX,
+                    expectedWidth: 150...300,
+                    in: window
+                ),
+            ],
+            expectedWidth: 150...300
+        )
+    }
+
+    @MainActor
+    private static func inspectorFrame(in window: NSWindow) -> CGRect? {
+        firstPlausibleColumnFrame(
+            [
+                ReleaseVisualQAProbeRegistry.frame(
+                    named: ReleaseVisualQALayoutValidator.coachInspector,
+                    in: window
+                ),
+                accessibilityFrame(
+                    identifier: CoachInspectorMetrics.accessibilityIdentifier,
+                    in: window
+                ),
+                splitPaneFrame(
+                    edge: .maxX,
+                    expectedWidth: 250...520,
+                    in: window
+                ),
+            ],
+            expectedWidth: 250...520
+        )
+    }
+
+    private static func firstPlausibleColumnFrame(
+        _ frames: [CGRect?],
+        expectedWidth: ClosedRange<CGFloat>
+    ) -> CGRect? {
+        frames.compactMap { $0 }.first {
+            expectedWidth.contains($0.width) && $0.height > 100
+        }
+    }
+
+    @MainActor
     private static func gameDetailFrame(in window: NSWindow) -> CGRect? {
         if let accessibilityFrame = accessibilityFrame(
             identifier: "app-game-detail-column",
@@ -1797,17 +1811,7 @@ enum ReleaseVisualQARunner {
             append(
                 ReleaseVisualQALayoutValidator.navigation,
                 owner: ReleaseVisualQALayoutValidator.window,
-                frame: ReleaseVisualQAProbeRegistry.frame(
-                    named: ReleaseVisualQALayoutValidator.navigation,
-                    in: window
-                ) ?? accessibilityFrame(
-                        identifier: "app-navigation-column",
-                        in: window
-                    ) ?? splitPaneFrame(
-                        edge: .minX,
-                        expectedWidth: 150...300,
-                        in: window
-                    )
+                frame: navigationFrame(in: window)
             )
             for section in AppSection.allCases {
                 let name = "navigation-\(section.rawValue)"
@@ -1836,17 +1840,7 @@ enum ReleaseVisualQARunner {
         append(
             ReleaseVisualQALayoutValidator.coachInspector,
             owner: ReleaseVisualQALayoutValidator.window,
-            frame: ReleaseVisualQAProbeRegistry.frame(
-                named: ReleaseVisualQALayoutValidator.coachInspector,
-                in: window
-            ) ?? accessibilityFrame(
-                    identifier: CoachInspectorMetrics.accessibilityIdentifier,
-                    in: window
-                ) ?? splitPaneFrame(
-                    edge: .maxX,
-                    expectedWidth: 250...520,
-                    in: window
-                )
+            frame: inspectorFrame(in: window)
         )
         append(
             ReleaseVisualQALayoutValidator.board,
