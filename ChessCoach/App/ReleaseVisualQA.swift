@@ -1355,18 +1355,11 @@ enum ReleaseVisualQARunner {
     private static func toggleNavigationSidebar(
         in window: NSWindow
     ) async throws {
-        window.makeFirstResponder(window.contentView)
         let priorState = isNavigationExpanded(in: window)
-        let sent = NSApplication.shared.sendAction(
-            #selector(NSSplitViewController.toggleSidebar(_:)),
-            to: nil,
-            from: nil
+        NotificationCenter.default.post(
+            name: ChessCoachWindowLayout.toggleSidebarNotification,
+            object: nil
         )
-        guard sent else {
-            throw ReleaseVisualQAError.splitViewUnavailable(
-                "navigation"
-            )
-        }
         let changed = await wait(timeout: .seconds(3)) {
             window.contentView?.layoutSubtreeIfNeeded()
             return isNavigationExpanded(in: window) != priorState

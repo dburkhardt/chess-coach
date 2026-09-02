@@ -28,26 +28,25 @@ struct RootView: View {
     private var visualQANavigationExpanded = true
 
     var body: some View {
-        NavigationSplitView(
-            columnVisibility: navigationColumnVisibility
-        ) {
-            AppNavigationSidebar(selection: $model.selection)
-                .environment(
-                    \.controlActiveState,
-                    visualQAUsesInactiveNavigationSelection
-                        ? .inactive
-                        : inheritedControlActiveState
-                )
-                .navigationSplitViewColumnWidth(
-                    min: navigationWidths.minimum,
-                    ideal: navigationWidths.ideal,
-                    max: navigationWidths.maximum
-                )
-                .accessibilityIdentifier("app-navigation-column")
-                .releaseVisualQAProbe(
-                    ReleaseVisualQALayoutValidator.navigation
-                )
-        } detail: {
+        HStack(spacing: 0) {
+            if isNavigationSidebarExpanded {
+                AppNavigationSidebar(selection: $model.selection)
+                    .environment(
+                        \.controlActiveState,
+                        visualQAUsesInactiveNavigationSelection
+                            ? .inactive
+                            : inheritedControlActiveState
+                    )
+                    .frame(width: navigationWidths.ideal)
+                    .background(.bar)
+                    .accessibilityIdentifier("app-navigation-column")
+                    .releaseVisualQAProbe(
+                        ReleaseVisualQALayoutValidator.navigation
+                    )
+
+                Divider()
+            }
+
             NavigationStack {
                 content
                     .frame(minWidth: 620)
@@ -60,9 +59,15 @@ struct RootView: View {
                 Color(nsColor: .windowBackgroundColor)
             }
         }
-        .navigationSplitViewStyle(.balanced)
         .onAppear {
             applyNavigationSidebarLaunchOverride()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: ChessCoachWindowLayout.toggleSidebarNotification
+            )
+        ) { _ in
+            toggleNavigationSidebar()
         }
         .inspector(isPresented: $isCoachInspectorPresented) {
             CoachInspectorContainer(
@@ -88,6 +93,22 @@ struct RootView: View {
             )
         }
         .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button(action: toggleNavigationSidebar) {
+                    Label(
+                        isNavigationSidebarExpanded
+                            ? "Hide Sidebar"
+                            : "Show Sidebar",
+                        systemImage: "sidebar.left"
+                    )
+                }
+                .help(
+                    isNavigationSidebarExpanded
+                        ? "Hide Sidebar"
+                        : "Show Sidebar"
+                )
+            }
+
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     isCoachInspectorPresented.toggle()
@@ -160,26 +181,23 @@ struct RootView: View {
         )
     }
 
-    private var navigationColumnVisibility:
-        Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: {
-                if ReleaseVisualQAConfiguration.isRequested {
-                    return visualQANavigationExpanded ? .all : .detailOnly
-                }
-                return AppNavigationSidebarVisibility(
-                    rawValue: navigationSidebarVisibilityRaw
-                )?.splitViewVisibility ?? .all
-            },
-            set: { visibility in
-                if ReleaseVisualQAConfiguration.isRequested {
-                    visualQANavigationExpanded = visibility != .detailOnly
-                } else {
-                    navigationSidebarVisibilityRaw =
-                        AppNavigationSidebarVisibility(visibility).rawValue
-                }
-            }
-        )
+    private var isNavigationSidebarExpanded: Bool {
+        if ReleaseVisualQAConfiguration.isRequested {
+            return visualQANavigationExpanded
+        }
+        return AppNavigationSidebarVisibility(
+            rawValue: navigationSidebarVisibilityRaw
+        ) != .collapsed
+    }
+
+    private func toggleNavigationSidebar() {
+        if ReleaseVisualQAConfiguration.isRequested {
+            visualQANavigationExpanded.toggle()
+        } else {
+            navigationSidebarVisibilityRaw = isNavigationSidebarExpanded
+                ? AppNavigationSidebarVisibility.collapsed.rawValue
+                : AppNavigationSidebarVisibility.expanded.rawValue
+        }
     }
 
     private func applyNavigationSidebarLaunchOverride() {

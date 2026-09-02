@@ -96,7 +96,15 @@ struct ChessCoachApp: App {
             height: visualQAConfiguration?.scenario.windowSize.height ?? 900
         )
         .commands {
-            SidebarCommands()
+            CommandGroup(replacing: .sidebar) {
+                Button("Toggle Sidebar") {
+                    NotificationCenter.default.post(
+                        name: ChessCoachWindowLayout.toggleSidebarNotification,
+                        object: nil
+                    )
+                }
+                .keyboardShortcut("s", modifiers: [.command, .control])
+            }
 
             CommandGroup(replacing: .newItem) {
                 Button("New Game") {
