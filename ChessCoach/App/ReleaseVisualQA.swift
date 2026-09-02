@@ -1737,6 +1737,7 @@ enum ReleaseVisualQARunner {
                     identifier: "app-navigation-column",
                     in: window
                 ),
+                navigationFrameFromRows(in: window),
                 splitPaneFrame(
                     edge: .minX,
                     expectedWidth: 150...300,
@@ -1745,6 +1746,35 @@ enum ReleaseVisualQARunner {
             ],
             expectedWidth: 150...300
         )
+    }
+
+    @MainActor
+    private static func navigationFrameFromRows(
+        in window: NSWindow
+    ) -> CGRect? {
+        let frames = AppSection.allCases.compactMap { section in
+            let name = "navigation-\(section.rawValue)"
+            return ReleaseVisualQAProbeRegistry.frame(
+                named: name,
+                in: window
+            ) ?? accessibilityFrame(
+                identifier: "app-navigation-\(section.rawValue)",
+                in: window
+            )
+        }.filter(isUsable)
+        guard frames.count == AppSection.allCases.count,
+              let first = frames.first
+        else {
+            return nil
+        }
+
+        // The shipping sidebar gives every navigation row 10 points of
+        // horizontal inset. Their union spans from the first destination to
+        // Settings, so expanding it by that known inset reconstructs the
+        // visible native column without relying on private SwiftUI classes.
+        return frames.dropFirst().reduce(first) { partial, frame in
+            partial.union(frame)
+        }.insetBy(dx: -10, dy: 0)
     }
 
     @MainActor
