@@ -436,6 +436,42 @@ struct ReleaseVisualQALayoutTests {
         #expect(rootView.contains(".accessibility1"))
     }
 
+    @Test func candidateWidthsAreSeededBeforeSceneConstruction() throws {
+        let suiteName = "release-visual-qa-widths-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        ReleaseVisualQAConfiguration.Scenario.freshDefaultDark
+            .applyCandidateViewOverrides(to: defaults)
+        #expect(
+            defaults.double(
+                forKey: ReleaseVisualQAViewOverrides.navigationWidthKey
+            ) == 220
+        )
+        #expect(
+            defaults.double(
+                forKey: ReleaseVisualQAViewOverrides.inspectorWidthKey
+            ) == 360
+        )
+
+        ReleaseVisualQAConfiguration.Scenario.sidebarMinimumWidthDefaultLight
+            .applyCandidateViewOverrides(to: defaults)
+        #expect(
+            defaults.double(
+                forKey: ReleaseVisualQAViewOverrides.navigationWidthKey
+            ) == 190
+        )
+
+        ReleaseVisualQAConfiguration.Scenario
+            .missingInferenceKeyMaximumInspectorLight
+            .applyCandidateViewOverrides(to: defaults)
+        #expect(
+            defaults.double(
+                forKey: ReleaseVisualQAViewOverrides.inspectorWidthKey
+            ) == 460
+        )
+    }
+
     @Test func beta9TruncatedPixelFixtureFailsSpatialOCR() throws {
         let repository = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()

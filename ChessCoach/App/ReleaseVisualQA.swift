@@ -154,6 +154,23 @@ struct ReleaseVisualQAConfiguration {
         var usesLargeText: Bool {
             self == .missingInferenceKeyMinimumInspectorLargeTextLight
         }
+
+        func applyCandidateViewOverrides(to defaults: UserDefaults) {
+            defaults.set(
+                Double(
+                    requestedNavigationWidth ??
+                        AppNavigationSidebarMetrics.idealWidth
+                ),
+                forKey: ReleaseVisualQAViewOverrides.navigationWidthKey
+            )
+            defaults.set(
+                Double(
+                    requestedInspectorWidth ??
+                        CoachInspectorMetrics.idealWidth
+                ),
+                forKey: ReleaseVisualQAViewOverrides.inspectorWidthKey
+            )
+        }
     }
 
     let mode: Mode
@@ -200,6 +217,11 @@ struct ReleaseVisualQAConfiguration {
         defaults.set(true, forKey: "chessboard.showCoordinates")
         defaults.set(true, forKey: "chessboard.showLegalMoves")
         defaults.set(false, forKey: "coaching.defaultBlunderGuard")
+        // Seed the first scenario before SwiftUI constructs the shipping
+        // WindowGroup. On current macOS, changing exact NavigationSplitView
+        // and inspector constraints only after their native split views exist
+        // does not reliably resize the first rendered layout.
+        scenario.applyCandidateViewOverrides(to: defaults)
         if scenario == .sidebarCollapsedDefaultDark ||
             scenario == .freshCompactDark {
             defaults.set(
@@ -1086,20 +1108,7 @@ enum ReleaseVisualQARunner {
             forKey: ReleaseVisualQAViewOverrides.largeTextKey
         )
         if mode == .candidate {
-            defaults.set(
-                Double(
-                    scenario.requestedNavigationWidth ??
-                        AppNavigationSidebarMetrics.idealWidth
-                ),
-                forKey: ReleaseVisualQAViewOverrides.navigationWidthKey
-            )
-            defaults.set(
-                Double(
-                    scenario.requestedInspectorWidth ??
-                        CoachInspectorMetrics.idealWidth
-                ),
-                forKey: ReleaseVisualQAViewOverrides.inspectorWidthKey
-            )
+            scenario.applyCandidateViewOverrides(to: defaults)
         }
         setWindowPresentation(window, scenario: scenario, mode: mode)
         configureInference(for: scenario, model: model)
