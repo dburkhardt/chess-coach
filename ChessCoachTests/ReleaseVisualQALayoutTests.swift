@@ -432,6 +432,7 @@ struct ReleaseVisualQALayoutTests {
         #expect(visualRunner.contains("waitForCandidateColumnWidths"))
         #expect(visualRunner.contains("setCandidateNavigationVisibility"))
         #expect(visualRunner.contains("firstPlausibleColumnFrame"))
+        #expect(visualRunner.contains("renderedWindowFrame(in: window)"))
         #expect(visualRunner.contains("navigationFrameFromRows"))
         #expect(visualRunner.contains("frames.count == AppSection.allCases.count"))
         #expect(
