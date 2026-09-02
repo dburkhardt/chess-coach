@@ -222,6 +222,10 @@ struct ReleaseVisualQAConfiguration {
         // and inspector constraints only after their native split views exist
         // does not reliably resize the first rendered layout.
         scenario.applyCandidateViewOverrides(to: defaults)
+        defaults.set(
+            scenario.expectsExpandedNavigation,
+            forKey: ReleaseVisualQAViewOverrides.navigationExpandedKey
+        )
         if scenario == .sidebarCollapsedDefaultDark ||
             scenario == .freshCompactDark {
             defaults.set(
@@ -408,6 +412,8 @@ enum ReleaseVisualQAViewOverrides {
     static let largeTextKey = "release.visualQA.largeText"
     static let navigationWidthKey = "release.visualQA.navigationWidth"
     static let inspectorWidthKey = "release.visualQA.inspectorWidth"
+    static let navigationExpandedKey =
+        "release.visualQA.navigationExpanded"
 }
 
 private struct ReleaseVisualQACredentialStore: KeychainStoring, Sendable {
@@ -1194,12 +1200,22 @@ enum ReleaseVisualQARunner {
             }
         }
 
-        try await setNavigationVisibility(
-            expanded: scenario.expectsExpandedNavigation,
-            window: window,
-            cycleBeforeExpanding:
-                scenario == .sidebarRestoredExpandedDefaultLight
-        )
+        if mode == .candidate {
+            try await setCandidateNavigationVisibility(
+                expanded: scenario.expectsExpandedNavigation,
+                window: window,
+                defaults: defaults,
+                cycleBeforeExpanding:
+                    scenario == .sidebarRestoredExpandedDefaultLight
+            )
+        } else {
+            try await setNavigationVisibility(
+                expanded: scenario.expectsExpandedNavigation,
+                window: window,
+                cycleBeforeExpanding:
+                    scenario == .sidebarRestoredExpandedDefaultLight
+            )
+        }
 
         // Candidate-only AppStorage overrides constrain the shipping
         // NavigationSplitView and inspector to exact widths without depending
@@ -1278,6 +1294,49 @@ enum ReleaseVisualQARunner {
             throw ReleaseVisualQAError.layoutProbeUnavailable(
                 expanded ? "expanded navigation" : "collapsed navigation"
             )
+        }
+    }
+
+    @MainActor
+    private static func setCandidateNavigationVisibility(
+        expanded: Bool,
+        window: NSWindow,
+        defaults: UserDefaults,
+        cycleBeforeExpanding: Bool
+    ) async throws {
+        if cycleBeforeExpanding {
+            defaults.set(
+                false,
+                forKey: ReleaseVisualQAViewOverrides.navigationExpandedKey
+            )
+            guard await waitForNavigationVisibility(
+                expanded: false,
+                in: window
+            ) else {
+                throw ReleaseVisualQAError.splitViewUnavailable("navigation")
+            }
+        }
+
+        defaults.set(
+            expanded,
+            forKey: ReleaseVisualQAViewOverrides.navigationExpandedKey
+        )
+        guard await waitForNavigationVisibility(
+            expanded: expanded,
+            in: window
+        ) else {
+            throw ReleaseVisualQAError.splitViewUnavailable("navigation")
+        }
+    }
+
+    @MainActor
+    private static func waitForNavigationVisibility(
+        expanded: Bool,
+        in window: NSWindow
+    ) async -> Bool {
+        await wait(timeout: .seconds(3)) {
+            window.contentView?.layoutSubtreeIfNeeded()
+            return isNavigationExpanded(in: window) == expanded
         }
     }
 

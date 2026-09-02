@@ -24,6 +24,8 @@ struct RootView: View {
     private var visualQANavigationWidth = 0.0
     @AppStorage(ReleaseVisualQAViewOverrides.inspectorWidthKey)
     private var visualQAInspectorWidth = 0.0
+    @AppStorage(ReleaseVisualQAViewOverrides.navigationExpandedKey)
+    private var visualQANavigationExpanded = true
 
     var body: some View {
         NavigationSplitView(
@@ -163,13 +165,20 @@ struct RootView: View {
         Binding<NavigationSplitViewVisibility> {
         Binding(
             get: {
-                AppNavigationSidebarVisibility(
+                if ReleaseVisualQAConfiguration.isRequested {
+                    return visualQANavigationExpanded ? .all : .detailOnly
+                }
+                return AppNavigationSidebarVisibility(
                     rawValue: navigationSidebarVisibilityRaw
                 )?.splitViewVisibility ?? .all
             },
             set: { visibility in
-                navigationSidebarVisibilityRaw =
-                    AppNavigationSidebarVisibility(visibility).rawValue
+                if ReleaseVisualQAConfiguration.isRequested {
+                    visualQANavigationExpanded = visibility != .detailOnly
+                } else {
+                    navigationSidebarVisibilityRaw =
+                        AppNavigationSidebarVisibility(visibility).rawValue
+                }
             }
         )
     }
