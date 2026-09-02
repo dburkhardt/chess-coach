@@ -160,6 +160,9 @@ enum ChessCoachWindowLayout {
     /// Values are `expanded` or `collapsed`; the app consumes and clears it.
     static let sidebarVisibilityLaunchOverrideKey =
         "layout.navigationSidebar.visibilityLaunchOverride"
+    static let toggleSidebarNotification = Notification.Name(
+        "ChessCoachWindowLayout.toggleSidebar"
+    )
 
     private static let splitViewRepairKey =
         "layout.sidebarNavigationSplitViewRepair.v3"
