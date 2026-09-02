@@ -784,7 +784,7 @@ enum ReleaseVisualQAProbeRegistry {
             return nil
         }
         let windowFrame = view.convert(view.bounds, to: nil)
-        return window.convertToScreen(windowFrame)
+        return windowFrame
     }
 }
 
@@ -1394,9 +1394,7 @@ enum ReleaseVisualQARunner {
     @MainActor
     private static func renderedWindowFrame(in window: NSWindow) -> CGRect {
         guard let contentView = window.contentView else { return window.frame }
-        return window.convertToScreen(
-            contentView.convert(contentView.bounds, to: nil)
-        )
+        return contentView.convert(contentView.bounds, to: nil)
     }
 
     @MainActor
@@ -1429,9 +1427,7 @@ enum ReleaseVisualQARunner {
             .enumerated()
             .flatMap { splitIndex, splitView in
                 splitView.subviews.enumerated().map { paneIndex, pane in
-                    let frame = window.convertToScreen(
-                        pane.convert(pane.bounds, to: nil)
-                    )
+                    let frame = pane.convert(pane.bounds, to: nil)
                     return "split\(splitIndex).pane\(paneIndex)=" +
                         describe(frame)
                 }
@@ -1705,7 +1701,9 @@ enum ReleaseVisualQARunner {
                     AccessibilitySnapshot(
                         identifier: view.accessibilityIdentifier(),
                         label: view.accessibilityLabel(),
-                        frame: view.accessibilityFrame()
+                        frame: window.convertFromScreen(
+                            view.accessibilityFrame()
+                        )
                     )
                 )
                 for child in view.accessibilityChildren() ?? [] {
@@ -1722,7 +1720,9 @@ enum ReleaseVisualQARunner {
                     AccessibilitySnapshot(
                         identifier: element.accessibilityIdentifier(),
                         label: element.accessibilityLabel(),
-                        frame: element.accessibilityFrame()
+                        frame: window.convertFromScreen(
+                            element.accessibilityFrame()
+                        )
                     )
                 )
                 for child in element.accessibilityChildren() ?? [] {
@@ -1773,17 +1773,16 @@ enum ReleaseVisualQARunner {
                     guard touchesRequestedEdge else { return nil }
                     let ideal: CGFloat = edge == .minX ? 220 : 360
                     let frameInWindow = pane.convert(pane.bounds, to: nil)
-                    let frameOnScreen = window.convertToScreen(frameInWindow)
                     let windowEdgeDistance: CGFloat
                     let renderedWindow = renderedWindowFrame(in: window)
                     switch edge {
                     case .minX:
                         windowEdgeDistance = abs(
-                            frameOnScreen.minX - renderedWindow.minX
+                            frameInWindow.minX - renderedWindow.minX
                         )
                     case .maxX:
                         windowEdgeDistance = abs(
-                            frameOnScreen.maxX - renderedWindow.maxX
+                            frameInWindow.maxX - renderedWindow.maxX
                         )
                     default:
                         return nil
@@ -1794,7 +1793,7 @@ enum ReleaseVisualQARunner {
                     // rejecting those prevents a false "collapsed" reading.
                     guard windowEdgeDistance <= 12 else { return nil }
                     return (
-                        frameOnScreen,
+                        frameInWindow,
                         abs(pane.frame.width - ideal),
                         windowEdgeDistance
                     )
@@ -1914,7 +1913,7 @@ enum ReleaseVisualQARunner {
             }
             .sorted { $0.frame.width < $1.frame.width }
         guard let pane = panes.first else { return nil }
-        return window.convertToScreen(pane.convert(pane.bounds, to: nil))
+        return pane.convert(pane.bounds, to: nil)
     }
 
     @MainActor
