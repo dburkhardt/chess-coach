@@ -844,6 +844,10 @@ private struct CompactMoveHistoryMenu: View {
         .menuStyle(.borderlessButton)
         .fixedSize()
         .help("Show move history")
+        .accessibilityLabel("Move history")
+        .releaseVisualQAProbe(
+            ReleaseVisualQALayoutValidator.moveHistory
+        )
     }
 
     private func moveLabel(for ply: SavedPly) -> String {
