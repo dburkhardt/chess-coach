@@ -783,8 +783,8 @@ enum ReleaseVisualQAProbeRegistry {
         else {
             return nil
         }
-        let windowFrame = view.convert(view.bounds, to: nil)
-        return windowFrame
+        guard let contentView = window.contentView else { return nil }
+        return view.convert(view.bounds, to: contentView)
     }
 }
 
@@ -1394,7 +1394,7 @@ enum ReleaseVisualQARunner {
     @MainActor
     private static func renderedWindowFrame(in window: NSWindow) -> CGRect {
         guard let contentView = window.contentView else { return window.frame }
-        return contentView.convert(contentView.bounds, to: nil)
+        return contentView.bounds
     }
 
     @MainActor
@@ -1427,7 +1427,10 @@ enum ReleaseVisualQARunner {
             .enumerated()
             .flatMap { splitIndex, splitView in
                 splitView.subviews.enumerated().map { paneIndex, pane in
-                    let frame = pane.convert(pane.bounds, to: nil)
+                    let frame = pane.convert(
+                        pane.bounds,
+                        to: window.contentView
+                    )
                     return "split\(splitIndex).pane\(paneIndex)=" +
                         describe(frame)
                 }
@@ -1772,7 +1775,10 @@ enum ReleaseVisualQARunner {
                     }
                     guard touchesRequestedEdge else { return nil }
                     let ideal: CGFloat = edge == .minX ? 220 : 360
-                    let frameInWindow = pane.convert(pane.bounds, to: nil)
+                    let frameInWindow = pane.convert(
+                        pane.bounds,
+                        to: window.contentView
+                    )
                     let windowEdgeDistance: CGFloat
                     let renderedWindow = renderedWindowFrame(in: window)
                     switch edge {
@@ -1913,7 +1919,7 @@ enum ReleaseVisualQARunner {
             }
             .sorted { $0.frame.width < $1.frame.width }
         guard let pane = panes.first else { return nil }
-        return pane.convert(pane.bounds, to: nil)
+        return pane.convert(pane.bounds, to: window.contentView)
     }
 
     @MainActor
