@@ -433,6 +433,8 @@ struct ReleaseVisualQALayoutTests {
         #expect(visualRunner.contains("setCandidateNavigationVisibility"))
         #expect(visualRunner.contains("firstPlausibleColumnFrame"))
         #expect(visualRunner.contains("renderedWindowFrame(in: window)"))
+        #expect(!visualRunner.contains("window.convertToScreen"))
+        #expect(visualRunner.contains("window.convertFromScreen"))
         #expect(visualRunner.contains("navigationFrameFromRows"))
         #expect(visualRunner.contains("frames.count == AppSection.allCases.count"))
         #expect(
