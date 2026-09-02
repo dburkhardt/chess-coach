@@ -1387,7 +1387,16 @@ enum ReleaseVisualQARunner {
         else {
             return false
         }
-        return window.frame.intersection(frame).width >= frame.width - 4
+        let renderedWindow = renderedWindowFrame(in: window)
+        return renderedWindow.intersection(frame).width >= frame.width - 4
+    }
+
+    @MainActor
+    private static func renderedWindowFrame(in window: NSWindow) -> CGRect {
+        guard let contentView = window.contentView else { return window.frame }
+        return window.convertToScreen(
+            contentView.convert(contentView.bounds, to: nil)
+        )
     }
 
     @MainActor
@@ -1432,6 +1441,8 @@ enum ReleaseVisualQARunner {
             "Chess Coach visual QA navigation diagnostics: " +
                 "expectedExpanded=\(expectedExpanded); " +
                 "window=\(describe(window.frame)); " +
+                "renderedWindow=" +
+                "\(describe(renderedWindowFrame(in: window))); " +
                 "containerProbe=\(describe(containerProbe)); " +
                 "containerAccessibility=" +
                 "\(describe(containerAccessibility)); rows=[\(rows)]; " +
@@ -1764,14 +1775,15 @@ enum ReleaseVisualQARunner {
                     let frameInWindow = pane.convert(pane.bounds, to: nil)
                     let frameOnScreen = window.convertToScreen(frameInWindow)
                     let windowEdgeDistance: CGFloat
+                    let renderedWindow = renderedWindowFrame(in: window)
                     switch edge {
                     case .minX:
                         windowEdgeDistance = abs(
-                            frameOnScreen.minX - window.frame.minX
+                            frameOnScreen.minX - renderedWindow.minX
                         )
                     case .maxX:
                         windowEdgeDistance = abs(
-                            frameOnScreen.maxX - window.frame.maxX
+                            frameOnScreen.maxX - renderedWindow.maxX
                         )
                     default:
                         return nil
@@ -1914,7 +1926,9 @@ enum ReleaseVisualQARunner {
             ReleaseVisualQALayoutProbe(
                 name: ReleaseVisualQALayoutValidator.window,
                 owner: "",
-                frame: ReleaseVisualQARect(window.frame)
+                frame: ReleaseVisualQARect(
+                    renderedWindowFrame(in: window)
+                )
             )
         ]
 
