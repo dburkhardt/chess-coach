@@ -58,7 +58,6 @@ struct RootView: View {
             )
             .background {
                 Color(nsColor: .windowBackgroundColor)
-                    .backgroundExtensionEffect()
             }
         }
         .navigationSplitViewStyle(.balanced)
