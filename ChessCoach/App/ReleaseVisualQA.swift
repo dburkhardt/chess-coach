@@ -1354,6 +1354,11 @@ enum ReleaseVisualQARunner {
                 accessibilityFrame(
                     identifier: CoachInspectorMetrics.accessibilityIdentifier,
                     in: window
+                )?.width ??
+                splitPaneFrame(
+                    edge: .maxX,
+                    expectedWidth: 250...520,
+                    in: window
                 )?.width
             let inspectorMatches = inspectorWidth.map {
                 abs($0 - requestedInspectorWidth) <= 8
@@ -1367,6 +1372,11 @@ enum ReleaseVisualQARunner {
                 )?.width ??
                 accessibilityFrame(
                     identifier: "app-navigation-column",
+                    in: window
+                )?.width ??
+                splitPaneFrame(
+                    edge: .minX,
+                    expectedWidth: 150...300,
                     in: window
                 )?.width
             return navigationWidth.map {
