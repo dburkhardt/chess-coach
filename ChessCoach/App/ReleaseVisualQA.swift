@@ -1310,10 +1310,15 @@ enum ReleaseVisualQARunner {
                 false,
                 forKey: ReleaseVisualQAViewOverrides.navigationExpandedKey
             )
-            guard await waitForNavigationVisibility(
+            let collapsed = await waitForNavigationVisibility(
                 expanded: false,
                 in: window
-            ) else {
+            )
+            guard collapsed else {
+                writeNavigationProbeDiagnostics(
+                    expectedExpanded: false,
+                    window: window
+                )
                 throw ReleaseVisualQAError.splitViewUnavailable("navigation")
             }
         }
@@ -1322,10 +1327,15 @@ enum ReleaseVisualQARunner {
             expanded,
             forKey: ReleaseVisualQAViewOverrides.navigationExpandedKey
         )
-        guard await waitForNavigationVisibility(
+        let matched = await waitForNavigationVisibility(
             expanded: expanded,
             in: window
-        ) else {
+        )
+        guard matched else {
+            writeNavigationProbeDiagnostics(
+                expectedExpanded: expanded,
+                window: window
+            )
             throw ReleaseVisualQAError.splitViewUnavailable("navigation")
         }
     }
@@ -1378,6 +1388,66 @@ enum ReleaseVisualQARunner {
             return false
         }
         return window.frame.intersection(frame).width >= frame.width - 4
+    }
+
+    @MainActor
+    private static func writeNavigationProbeDiagnostics(
+        expectedExpanded: Bool,
+        window: NSWindow
+    ) {
+        let containerProbe = ReleaseVisualQAProbeRegistry.frame(
+            named: ReleaseVisualQALayoutValidator.navigation,
+            in: window
+        )
+        let containerAccessibility = accessibilityFrame(
+            identifier: "app-navigation-column",
+            in: window
+        )
+        let rows = AppSection.allCases.map { section in
+            let name = "navigation-\(section.rawValue)"
+            let probe = ReleaseVisualQAProbeRegistry.frame(
+                named: name,
+                in: window
+            )
+            let accessibility = accessibilityFrame(
+                identifier: "app-navigation-\(section.rawValue)",
+                in: window
+            )
+            return "\(name) probe=\(describe(probe)) " +
+                "accessibility=\(describe(accessibility))"
+        }.joined(separator: "; ")
+        let nativePanes = splitViewCandidates(in: window)
+            .enumerated()
+            .flatMap { splitIndex, splitView in
+                splitView.subviews.enumerated().map { paneIndex, pane in
+                    let frame = window.convertToScreen(
+                        pane.convert(pane.bounds, to: nil)
+                    )
+                    return "split\(splitIndex).pane\(paneIndex)=" +
+                        describe(frame)
+                }
+            }
+            .joined(separator: "; ")
+        ReleaseVisualQAConfiguration.writeError(
+            "Chess Coach visual QA navigation diagnostics: " +
+                "expectedExpanded=\(expectedExpanded); " +
+                "window=\(describe(window.frame)); " +
+                "containerProbe=\(describe(containerProbe)); " +
+                "containerAccessibility=" +
+                "\(describe(containerAccessibility)); rows=[\(rows)]; " +
+                "nativePanes=[\(nativePanes)]\n"
+        )
+    }
+
+    private static func describe(_ frame: CGRect?) -> String {
+        guard let frame else { return "nil" }
+        return String(
+            format: "(%.1f,%.1f %.1fx%.1f)",
+            frame.minX,
+            frame.minY,
+            frame.width,
+            frame.height
+        )
     }
 
     @MainActor
