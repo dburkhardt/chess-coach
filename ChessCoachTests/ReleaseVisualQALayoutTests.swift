@@ -437,6 +437,7 @@ struct ReleaseVisualQALayoutTests {
                 "splitPaneFrame(\n                    edge: .maxX"
             )
         )
+        #expect(visualRunner.contains("windowEdgeDistance <= 12"))
         #expect(!visualRunner.contains(".setPosition("))
         #expect(!visualRunner.contains("NSApplication.shared.activate"))
         #expect(!visualRunner.contains(".activateAllWindows"))
