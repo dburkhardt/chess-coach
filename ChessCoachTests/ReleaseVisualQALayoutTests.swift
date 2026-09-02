@@ -456,6 +456,7 @@ struct ReleaseVisualQALayoutTests {
                 "visualQAOverride: ReleaseVisualQAConfiguration.isRequested"
             )
         )
+        #expect(!rootView.contains(".backgroundExtensionEffect()"))
         #expect(
             visualRunner.contains(
                 "[String: [ReleaseVisualQAWeakProbe]]"
