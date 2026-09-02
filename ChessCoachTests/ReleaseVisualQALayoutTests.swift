@@ -375,6 +375,12 @@ struct ReleaseVisualQALayoutTests {
             ),
             encoding: .utf8
         )
+        let app = try String(
+            contentsOf: repository.appendingPathComponent(
+                "ChessCoach/App/ChessCoachApp.swift"
+            ),
+            encoding: .utf8
+        )
         let visualRunner = try String(
             contentsOf: repository.appendingPathComponent(
                 "ChessCoach/App/ReleaseVisualQA.swift"
@@ -457,6 +463,8 @@ struct ReleaseVisualQALayoutTests {
             )
         )
         #expect(!rootView.contains(".backgroundExtensionEffect()"))
+        #expect(app.contains(".frame(minWidth: 620, minHeight: 760)"))
+        #expect(!app.contains(".frame(minWidth: 980, minHeight: 760)"))
         #expect(
             visualRunner.contains(
                 "[String: [ReleaseVisualQAWeakProbe]]"

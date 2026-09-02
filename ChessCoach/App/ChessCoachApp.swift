@@ -154,7 +154,7 @@ struct ChessCoachApp: App {
             .environment(model)
             .modelContainer(model.persistence.container)
             .defaultAppStorage(appDefaults)
-            .frame(minWidth: 980, minHeight: 760)
+            .frame(minWidth: 620, minHeight: 760)
 
         if let visualQAConfiguration {
             if visualQAConfiguration.scenarios.count == 1 {
