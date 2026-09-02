@@ -420,6 +420,16 @@ struct ReleaseVisualQALayoutTests {
         )
         #expect(visualRunner.contains("ReleaseVisualQAProbeRegistry.frame"))
         #expect(visualRunner.contains("waitForCandidateColumnWidths"))
+        #expect(
+            visualRunner.contains(
+                "splitPaneFrame(\n                    edge: .minX"
+            )
+        )
+        #expect(
+            visualRunner.contains(
+                "splitPaneFrame(\n                    edge: .maxX"
+            )
+        )
         #expect(!visualRunner.contains(".setPosition("))
         #expect(!visualRunner.contains("NSApplication.shared.activate"))
         #expect(!visualRunner.contains(".activateAllWindows"))
