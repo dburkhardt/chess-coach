@@ -138,6 +138,20 @@ struct OnboardingView: View {
             .textContentType(.password)
             .accessibilityIdentifier("onboarding-inference-key-field")
 
+            if settings.provider == .openAI {
+                VStack(alignment: .leading, spacing: 4) {
+                    Link(
+                        "Get an OpenAI API key",
+                        destination: URL(
+                            string: "https://platform.openai.com/settings/organization/api-keys"
+                        )!
+                    )
+                    Text("Sign in, create a key, then paste it into the Inference key field above.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
             credentialStatus(settings: settings)
 
             if settings.credentialPersistenceAvailability == .sessionOnly {
@@ -206,7 +220,8 @@ struct OnboardingView: View {
             statusView
 
             Text(
-                "Tests use the typed inference key without saving it. Model discovery is optional, "
+                "Tests use the typed inference key without saving it. Saving a key automatically "
+                    + "discovers models before you start. Model discovery is optional, "
                     + "so a manually entered model ID remains usable."
             )
             .font(.caption)
@@ -227,18 +242,18 @@ struct OnboardingView: View {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .isEmpty {
                     if settings.credentialPersistenceAvailability == .persistent {
-                        Button("Use for This Session & Start") {
-                            useForSessionAndComplete()
+                        Button("Use for This Session") {
+                            useForSessionAndDiscover()
                         }
                         .buttonStyle(.bordered)
 
-                        Button("Save Inference Key & Start") {
-                            saveAndComplete()
+                        Button("Save Inference Key") {
+                            saveAndDiscover()
                         }
                         .buttonStyle(.borderedProminent)
                     } else {
-                        Button("Use for This Session & Start") {
-                            useForSessionAndComplete()
+                        Button("Use for This Session") {
+                            useForSessionAndDiscover()
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -251,6 +266,7 @@ struct OnboardingView: View {
                 }
             }
             .controlSize(.large)
+            .disabled(isWorking)
         }
     }
 
@@ -314,24 +330,42 @@ struct OnboardingView: View {
         }
     }
 
-    private func saveAndComplete() {
+    private func saveAndDiscover() {
         do {
             try settings.savePersistentKey(inferenceKey)
             inferenceKey = ""
-            complete()
+            discoverModelsAfterKeyAction()
         } catch {
             status = .failure(error.localizedDescription)
         }
     }
 
-    private func useForSessionAndComplete() {
+    private func useForSessionAndDiscover() {
         settings.useKeyForSession(inferenceKey)
         inferenceKey = ""
-        complete()
+        discoverModelsAfterKeyAction()
+    }
+
+    private func discoverModelsAfterKeyAction() {
+        let configuration = settings.configuration
+        let credential = settings.keyForRequest(typedKey: "")
+        discoveredModels = []
+        run(
+            success: "Inference key configured. Choose a discovered model or enter a model ID.",
+            failurePrefix: "Inference key configured. Model discovery failed: "
+        ) {
+            let models = try await inference.listModels(
+                configuration: configuration, credential: credential
+            )
+            guard settings.configuration == configuration,
+                  settings.keyForRequest(typedKey: "") == credential else { return }
+            discoveredModels = models
+        }
     }
 
     private func run(
         success: String,
+        failurePrefix: String = "",
         _ work: @escaping @MainActor () async throws -> Void
     ) {
         isWorking = true
@@ -342,7 +376,7 @@ struct OnboardingView: View {
                 try await work()
                 status = .success(success)
             } catch {
-                status = .failure(error.localizedDescription)
+                status = .failure(failurePrefix + error.localizedDescription)
             }
         }
     }

@@ -962,7 +962,7 @@ final class GameCoordinator {
             isEngineThinking = false
             return
         }
-        activeClockSide = nil
+        activeClockSide = playerSide.opposite
         lastClockTick = clock.now()
         isEngineThinking = true
         let fen = state.fen
@@ -984,6 +984,8 @@ final class GameCoordinator {
                 applyOpponentMove(move)
             } catch {
                 guard isCurrent(token), !Task.isCancelled else { return }
+                tickClock()
+                guard status.result == .inProgress else { return }
                 isEngineThinking = false
                 activeClockSide = state.sideToMove == playerSide ? playerSide : nil
                 lastClockTick = clock.now()
@@ -994,6 +996,10 @@ final class GameCoordinator {
 
     private func applyOpponentMove(_ uci: String) {
         guard let game = activeGame else { return }
+        // Settle the final partial tick before switching turns. A reply that
+        // arrives after the computer flags must not be applied or persisted.
+        tickClock()
+        guard status.result == .inProgress else { return }
         coachTask?.cancel()
         coachTask = nil
         isCoachWorking = false

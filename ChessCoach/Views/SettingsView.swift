@@ -124,6 +124,20 @@ struct SettingsView: View {
                     .focused($focusedField, equals: .inferenceKey)
                     .accessibilityIdentifier("inference-key-field")
 
+                    if settings.provider == .openAI {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Link(
+                                "Get an OpenAI API key",
+                                destination: URL(
+                                    string: "https://platform.openai.com/settings/organization/api-keys"
+                                )!
+                            )
+                            Text("Sign in, create a key, then paste it into the Inference key field above.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
                     HStack {
                         credentialStatus
                         Spacer()
@@ -163,6 +177,7 @@ struct SettingsView: View {
                             }
                         }
                     }
+                    .disabled(isWorking)
 
                     if settings.credentialPersistenceAvailability
                         == .sessionOnly {
@@ -273,7 +288,8 @@ struct SettingsView: View {
                     Text(
                         "Tests use the inference key currently typed above before "
                             + "the session or stored key. The typed key is not kept "
-                            + "unless you choose a key action. Model discovery can "
+                            + "unless you choose a key action. Saving a key automatically "
+                            + "discovers models. Model discovery can "
                             + "be incomplete, so the manual model ID always remains "
                             + "available. When configured, the provider receives the "
                             + "current coaching context for background hint "
@@ -448,7 +464,7 @@ struct SettingsView: View {
         settings.useKeyForSession(inferenceKey)
         inferenceKey = ""
         appModel.coordinator.refreshPreparedCoachingForCurrentPosition()
-        status = .success("Inference key is available for this session.")
+        discoverModelsAfterKeyAction(success: "Inference key is available for this session.")
     }
 
     private func saveTypedKey() {
@@ -456,9 +472,7 @@ struct SettingsView: View {
             try settings.savePersistentKey(inferenceKey)
             inferenceKey = ""
             appModel.coordinator.refreshPreparedCoachingForCurrentPosition()
-            status = .success(
-                "Inference key saved securely in Keychain."
-            )
+            discoverModelsAfterKeyAction(success: "Inference key saved securely in Keychain.")
         } catch {
             status = .failure(error.localizedDescription)
         }
@@ -475,8 +489,26 @@ struct SettingsView: View {
         }
     }
 
+    private func discoverModelsAfterKeyAction(success: String) {
+        let configuration = settings.configuration
+        let credential = settings.keyForRequest(typedKey: "")
+        discoveredModels = []
+        run(
+            success: "\(success) Choose a discovered model or enter a model ID.",
+            failurePrefix: "\(success) Model discovery failed: "
+        ) {
+            let models = try await inference.listModels(
+                configuration: configuration, credential: credential
+            )
+            guard settings.configuration == configuration,
+                  settings.keyForRequest(typedKey: "") == credential else { return }
+            discoveredModels = models
+        }
+    }
+
     private func run(
         success: String,
+        failurePrefix: String = "",
         _ work: @escaping @MainActor () async throws -> Void
     ) {
         isWorking = true
@@ -487,7 +519,7 @@ struct SettingsView: View {
                 try await work()
                 status = .success(success)
             } catch {
-                status = .failure(error.localizedDescription)
+                status = .failure(failurePrefix + error.localizedDescription)
             }
         }
     }

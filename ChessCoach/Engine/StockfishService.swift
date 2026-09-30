@@ -1,11 +1,11 @@
 import Foundation
-import Darwin
 
-enum StockfishError: LocalizedError {
+enum StockfishError: LocalizedError, Equatable {
     case executableMissing
     case launchFailed(String)
     case engineStopped
     case noBestMove
+    case responseTimedOut
 
     var errorDescription: String? {
         switch self {
@@ -13,6 +13,7 @@ enum StockfishError: LocalizedError {
         case .launchFailed(let message): "Stockfish could not start: \(message)"
         case .engineStopped: "Stockfish stopped unexpectedly."
         case .noBestMove: "Stockfish did not return a legal move."
+        case .responseTimedOut: "Stockfish did not respond in time. Please retry the move or restart the game."
         }
     }
 }
@@ -26,9 +27,11 @@ actor StockfishService {
     }
 
     private static let engineStoppedLine = "__ENGINE_STOPPED__"
+    private static let responseTimedOutLine = "__ENGINE_RESPONSE_TIMED_OUT__"
 
     private let role: Role
     private let executableURL: URL?
+    private let responseTimeout: Duration
     private var process: Process?
     private var input: FileHandle?
     private var output: FileHandle?
@@ -37,6 +40,7 @@ actor StockfishService {
     private var errorReaderTask: Task<Void, Never>?
     private var lines: [String] = []
     private var waiters: [CheckedContinuation<String, Never>] = []
+    private var pendingReadID: UUID?
     private var partialLine = ""
     private var processGeneration = 0
 
@@ -50,14 +54,17 @@ actor StockfishService {
     private(set) var isReady = false
     private(set) var processLaunchCount = 0
 
-    init(role: Role, executableURL: URL? = nil) {
+    init(role: Role, executableURL: URL? = nil, responseTimeout: Duration = .seconds(30)) {
         self.role = role
         self.executableURL = executableURL
+        self.responseTimeout = responseTimeout
     }
 
     deinit {
         readerTask?.cancel()
         errorReaderTask?.cancel()
+        output?.readabilityHandler = nil
+        errorOutput?.readabilityHandler = nil
         try? input?.close()
         try? output?.close()
         try? errorOutput?.close()
@@ -187,6 +194,9 @@ actor StockfishService {
             if line == Self.engineStoppedLine {
                 throw StockfishError.engineStopped
             }
+            if line == Self.responseTimedOutLine {
+                throw StockfishError.responseTimedOut
+            }
             if let info = UCIParser.parseInfo(line) {
                 latest[info.multipv] = UCIParser.whitePerspective(info, sideToMove: sideToMove)
             }
@@ -265,6 +275,9 @@ actor StockfishService {
             if line == Self.engineStoppedLine {
                 throw StockfishError.engineStopped
             }
+            if line == Self.responseTimedOutLine {
+                throw StockfishError.responseTimedOut
+            }
             if line.hasPrefix("bestmove ") {
                 let best = UCIParser.parseBestMove(line)
                 try await synchronizeAfterSearch()
@@ -309,16 +322,15 @@ actor StockfishService {
 
         let output = outputPipe.fileHandleForReading
         self.output = output
-        let outputDescriptor = output.fileDescriptor
+        // Pipe reads must not occupy Swift's cooperative executor. Foundation
+        // invokes these handlers only when bytes (or EOF) are available; the
+        // async stream preserves byte order while the actor consumes them.
+        let outputStream = Self.pipeData(from: output)
         readerTask = Task.detached { [weak self] in
-            var buffer = [UInt8](repeating: 0, count: 16_384)
-            while !Task.isCancelled {
-                let count = buffer.withUnsafeMutableBytes {
-                    Darwin.read(outputDescriptor, $0.baseAddress, $0.count)
-                }
-                guard count > 0 else { break }
+            for await data in outputStream {
+                guard !Task.isCancelled else { break }
                 await self?.consume(
-                    data: Data(buffer.prefix(count)),
+                    data: data,
                     generation: generation
                 )
             }
@@ -327,14 +339,10 @@ actor StockfishService {
 
         let errorOutput = errorPipe.fileHandleForReading
         self.errorOutput = errorOutput
-        let errorDescriptor = errorOutput.fileDescriptor
+        let errorStream = Self.pipeData(from: errorOutput)
         errorReaderTask = Task.detached {
-            var buffer = [UInt8](repeating: 0, count: 16_384)
-            while !Task.isCancelled {
-                let count = buffer.withUnsafeMutableBytes {
-                    Darwin.read(errorDescriptor, $0.baseAddress, $0.count)
-                }
-                guard count > 0 else { break }
+            for await _ in errorStream {
+                guard !Task.isCancelled else { break }
             }
         }
 
@@ -358,6 +366,23 @@ actor StockfishService {
         try await wait(until: { $0 == "readyok" })
     }
 
+    private nonisolated static func pipeData(from handle: FileHandle) -> AsyncStream<Data> {
+        AsyncStream { continuation in
+            handle.readabilityHandler = { handle in
+                let data = handle.availableData
+                if data.isEmpty {
+                    handle.readabilityHandler = nil
+                    continuation.finish()
+                } else {
+                    continuation.yield(data)
+                }
+            }
+            continuation.onTermination = { _ in
+                handle.readabilityHandler = nil
+            }
+        }
+    }
+
     private func send(_ command: String) throws {
         guard process?.isRunning == true, let input else {
             throw StockfishError.engineStopped
@@ -378,14 +403,40 @@ actor StockfishService {
             if line == Self.engineStoppedLine {
                 throw StockfishError.engineStopped
             }
+            if line == Self.responseTimedOutLine {
+                throw StockfishError.responseTimedOut
+            }
             if predicate(line) { return }
         }
     }
 
     private func nextLine() async -> String {
         if !lines.isEmpty { return lines.removeFirst() }
+        let readID = UUID()
+        pendingReadID = readID
+        let timeout = responseTimeout
+        let watchdog = Task { [weak self] in
+            do {
+                try await Task.sleep(for: timeout)
+            } catch { return }
+            await self?.expireRead(readID)
+        }
+        defer {
+            watchdog.cancel()
+            if pendingReadID == readID { pendingReadID = nil }
+        }
         return await withCheckedContinuation { continuation in
             waiters.append(continuation)
+        }
+    }
+
+    private func expireRead(_ readID: UUID) {
+        guard pendingReadID == readID, !waiters.isEmpty else { return }
+        let pending = waiters
+        waiters.removeAll()
+        discardProcess(terminate: true)
+        for waiter in pending {
+            waiter.resume(returning: Self.responseTimedOutLine)
         }
     }
 
@@ -420,6 +471,8 @@ actor StockfishService {
         processGeneration += 1
         readerTask?.cancel()
         errorReaderTask?.cancel()
+        output?.readabilityHandler = nil
+        errorOutput?.readabilityHandler = nil
         try? input?.close()
         try? output?.close()
         try? errorOutput?.close()
