@@ -266,7 +266,7 @@ struct ReleaseVisualQALayoutTests {
         #expect(script.contains("stop_candidate_session"))
         #expect(!script.contains("run_scenario()"))
         #expect(
-            candidateOpenCommands == ["open -F -n -W \\"],
+            candidateOpenCommands == ["open -g -F -n -W \\"],
             "Candidate QA must contain exactly one app launch command."
         )
         #expect(
@@ -282,7 +282,7 @@ struct ReleaseVisualQALayoutTests {
         )
         #expect(
             installedOpenCommands == [
-                "open -n -W \\",
+                "open -g -n -W \\",
             ],
             "Installed QA must launch the app exactly once."
         )

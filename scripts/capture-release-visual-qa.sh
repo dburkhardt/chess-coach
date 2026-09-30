@@ -16,8 +16,8 @@ Usage: ./scripts/capture-release-visual-qa.sh --app /path/to/ChessCoach.app [--r
 
 Runs the signed release candidate's in-app --visual-qa harness once for the
 complete required whole-window scenario sequence, then creates a source-bound
-manifest and contact sheet under dist/visual-qa. Keep the candidate foreground;
-at most one click should be required at the beginning of the session.
+manifest and contact sheet under dist/visual-qa. The Mac must stay unlocked;
+the candidate does not need focus and may be covered by other windows.
 EOF
 }
 
@@ -167,14 +167,11 @@ run_capture_session() {
   CAPTURE_SESSION_ID=$(uuidgen)
 
   print "Starting one visual-QA session for all scenarios."
-  print "Keep Chess Coach frontmost; click its window once if macOS does not activate it."
+  print "Chess Coach captures its own window in the background; keep the Mac unlocked."
 
-  # Launch through LaunchServices so a normal, unlocked interactive release
-  # session can make this exact candidate frontmost. Directly executing an app
-  # bundle binary can leave AppKit inactive; WindowServer then returns a
-  # privacy-black image even though the window exists. The in-app harness
-  # refuses to capture unless its real window is both active and key.
-  open -F -n -W \
+  # Launch one shipping scene without activation. ScreenCaptureKit captures
+  # only that process's window, independently of desktop occlusion.
+  open -g -F -n -W \
     -o "${stdout_path}" \
     --stderr "${stderr_path}" \
     --env "LLVM_PROFILE_FILE=${PROFILE_DIR}/visual-qa-session-%p.profraw" \
@@ -186,10 +183,8 @@ run_capture_session() {
     "--scenario-sequence=${scenario_sequence}" &
   local process_id=$!
   CAPTURE_OPEN_PID=${process_id}
-  # Never call `open` again while this session is alive. If LaunchServices did
-  # not foreground the one candidate window, wait passively for the user's
-  # single click. Reopening can steal keyboard focus and create extra
-  # WindowGroup scenes.
+  # Never call `open` again while this session is alive. Reopening can steal
+  # keyboard focus and create extra WindowGroup scenes.
   local elapsed=0
 
   while kill -0 "${process_id}" >/dev/null 2>&1; do
@@ -214,7 +209,7 @@ run_capture_session() {
     tail -80 "${stdout_path}" >&2 || true
     tail -80 "${stderr_path}" >&2 || true
     visual_qa_die \
-      "The visual-QA session failed. Run Prepare from an unlocked interactive GUI session and keep Chess Coach frontmost."
+      "The visual-QA session failed. Inspect its capture log; keep the Mac unlocked."
   fi
   CAPTURE_OPEN_PID=""
   stop_candidate_session

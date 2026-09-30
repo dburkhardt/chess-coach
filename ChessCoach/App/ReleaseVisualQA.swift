@@ -1,5 +1,5 @@
 import AppKit
-import Darwin
+import ScreenCaptureKit
 import QuartzCore
 import SwiftData
 import SwiftUI
@@ -13,7 +13,7 @@ import SwiftUI
 ///       --scenario=fresh-default-dark
 ///
 /// Release preparation normally captures every candidate scenario in one
-/// foreground session:
+/// window-capture session (the app need not remain foreground):
 ///
 ///     ChessCoach --visual-qa \
 ///       --output-directory=/absolute/path \
@@ -445,7 +445,6 @@ private enum ReleaseVisualQAError: LocalizedError {
     case lessonUnavailable
     case gameCompletionUnavailable
     case inferenceSettingsUnavailable
-    case foregroundCaptureRequired
     case compositedWindowUnavailable
     case pngEncodingFailed
     case splitViewUnavailable(String)
@@ -479,10 +478,6 @@ private enum ReleaseVisualQAError: LocalizedError {
             "the completed-game presentation did not become ready"
         case .inferenceSettingsUnavailable:
             "the Inference destination did not become visible"
-        case .foregroundCaptureRequired:
-            "exact visual QA requires an unlocked foreground GUI session; " +
-                "run release preparation interactively and keep Chess Coach " +
-                "frontmost while each scenario is captured"
         case .compositedWindowUnavailable:
             "the WindowServer could not capture the composited native window"
         case .pngEncodingFailed:
@@ -966,36 +961,19 @@ enum ReleaseVisualQARunner {
             scenario: configuration.scenario,
             mode: configuration.mode
         )
-        // LaunchServices may start an automated candidate on the Space that
-        // last contained this bundle identifier while leaving another app
-        // frontmost. Put the exact shipping window on the active Space, but
-        // never force activation or steal focus. The capture waits passively
-        // for one user click if LaunchServices did not foreground it.
+        // Keep the shipping window available to WindowServer without taking
+        // focus. ScreenCaptureKit captures this window independently of the
+        // desktop and of windows covering it.
         var collectionBehavior = window.collectionBehavior
         collectionBehavior.remove(.canJoinAllSpaces)
         collectionBehavior.insert(.moveToActiveSpace)
         window.collectionBehavior = collectionBehavior
         window.orderFront(nil)
 
-        // Allow inspector sizing, vector assets, and the titlebar to finish
-        // their real-window layout before asking for the single foreground
-        // acquisition used by the complete candidate capture session.
+        // Allow inspector sizing, vector assets, and the titlebar to settle.
         try await Task.sleep(for: .milliseconds(700))
         window.contentView?.layoutSubtreeIfNeeded()
         window.contentView?.superview?.layoutSubtreeIfNeeded()
-        if !NSApplication.shared.isActive || !window.isKeyWindow {
-            ReleaseVisualQAConfiguration.writeError(
-                "Chess Coach visual QA: waiting for the real app window to " +
-                    "become foreground and key; click Chess Coach once to " +
-                    "capture the complete scenario sequence.\n"
-            )
-        }
-        let becameForeground = await wait(timeout: .seconds(60)) {
-            NSApplication.shared.isActive && window.isKeyWindow
-        }
-        guard becameForeground else {
-            throw ReleaseVisualQAError.foregroundCaptureRequired
-        }
 
         let installedPreferences: InstalledPreferenceSnapshot? = {
             guard configuration.mode == .installed else { return nil }
@@ -1025,10 +1003,7 @@ enum ReleaseVisualQARunner {
                     mode: configuration.mode,
                     defaults: session.defaults
                 )
-                guard NSApplication.shared.isActive, window.isKeyWindow else {
-                    throw ReleaseVisualQAError.foregroundCaptureRequired
-                }
-                try capture(
+                try await capture(
                     window: window,
                     configuration: configuration,
                     scenario: scenario
@@ -2048,7 +2023,7 @@ enum ReleaseVisualQARunner {
         window: NSWindow,
         configuration: ReleaseVisualQAConfiguration,
         scenario: ReleaseVisualQAConfiguration.Scenario
-    ) throws {
+    ) async throws {
         window.displayIfNeeded()
         window.contentView?.displayIfNeeded()
         CATransaction.flush()
@@ -2058,39 +2033,27 @@ enum ReleaseVisualQARunner {
                 "\(window.windowNumber), frame \(NSStringFromRect(window.frame)), " +
                 "visible \(window.isVisible), key \(window.isKeyWindow).\n"
         )
-        // Capturing an NSHostingView through cacheDisplay omits SwiftUI's
-        // separately composited inspector and material layers. Capture this
-        // app's own WindowServer surface instead so the release artifact is
-        // the same whole window a person sees. Dynamic lookup keeps this
-        // self-window capture available on current macOS without linking the
-        // screen-capture-obsoleted API into ordinary app execution.
-        typealias CreateWindowImage = @convention(c) (
-            CGRect,
-            CGWindowListOption,
-            CGWindowID,
-            CGWindowImageOption
-        ) -> Unmanaged<CGImage>?
-        guard let symbol = dlsym(
-            UnsafeMutableRawPointer(bitPattern: -2),
-            "CGWindowListCreateImage"
-        ) else {
+        // Query only our own process: this requires no screen-recording
+        // permission and cannot collect other apps' windows. A desktop-
+        // independent filter includes the native inspector and materials
+        // even when another app covers this window.
+        let content = try await SCShareableContent.currentProcess
+        guard let captureWindow = content.windows.first(where: {
+            $0.windowID == CGWindowID(window.windowNumber)
+        }) else {
             throw ReleaseVisualQAError.compositedWindowUnavailable
         }
-        let createWindowImage = unsafeBitCast(
-            symbol,
-            to: CreateWindowImage.self
+        let filter = SCContentFilter(desktopIndependentWindow: captureWindow)
+        let stream = SCStreamConfiguration()
+        stream.width = Int((filter.contentRect.width * CGFloat(filter.pointPixelScale)).rounded())
+        stream.height = Int((filter.contentRect.height * CGFloat(filter.pointPixelScale)).rounded())
+        stream.showsCursor = false
+        stream.ignoreShadowsSingleWindow = true
+        let image = try await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: stream
         )
-        guard let unmanagedImage = createWindowImage(
-            .null,
-            [.optionIncludingWindow],
-            CGWindowID(window.windowNumber),
-            [.bestResolution, .boundsIgnoreFraming]
-        ) else {
-            throw ReleaseVisualQAError.compositedWindowUnavailable
-        }
-        let bitmap = NSBitmapImageRep(
-            cgImage: unmanagedImage.takeRetainedValue()
-        )
+        let bitmap = NSBitmapImageRep(cgImage: image)
         guard let png = bitmap.representation(
             using: .png,
             properties: [:]

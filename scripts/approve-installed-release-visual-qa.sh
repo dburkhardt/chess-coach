@@ -125,8 +125,8 @@ release_gui_session_lock_acquire foreground ||
 # Do not use `open -F`: the post-install gate deliberately allows AppKit to
 # restore the real user's saved window/layout state. The in-app mode isolates
 # game data and secrets but captures the actual installed WindowGroup.
-print "Keep Chess Coach frontmost for the installed visual capture; click its window if needed."
-open -n -W \
+print "Chess Coach captures its own installed window in the background; keep the Mac unlocked."
+open -g -n -W \
   -o "${STDOUT_PATH}" \
   --stderr "${STDERR_PATH}" \
   "${APP_PATH}" \
@@ -135,10 +135,8 @@ open -n -W \
   "--output-directory=${CAPTURE_DIR}" \
   "--scenario=${SCENARIO}" &
 OPEN_PID=$!
-# Never call `open` again while the installed QA session is alive. If
-# LaunchServices did not foreground the one window, wait passively for the
-# user's single click. Reopening can steal keyboard focus and create extra
-# WindowGroup scenes.
+# Never call `open` again while the installed QA session is alive. Reopening
+# can steal keyboard focus and create extra WindowGroup scenes.
 ELAPSED=0
 while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
   if (( ELAPSED >= CAPTURE_TIMEOUT_SECONDS )); then
@@ -147,7 +145,7 @@ while kill -0 "${OPEN_PID}" >/dev/null 2>&1; do
     tail -80 "${STDOUT_PATH}" >&2 || true
     tail -80 "${STDERR_PATH}" >&2 || true
     visual_qa_die \
-      "Installed visual capture timed out. Keep the Mac unlocked and the installed Chess Coach frontmost."
+      "Installed visual capture timed out. Inspect its capture log; keep the Mac unlocked."
   fi
   sleep 1
   (( ELAPSED += 1 ))
