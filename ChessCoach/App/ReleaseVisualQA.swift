@@ -4,6 +4,14 @@ import QuartzCore
 import SwiftData
 import SwiftUI
 
+/// Drives SwiftUI's appearance for each scenario even in an inactive window.
+/// No preference is written to the user's normal app configuration.
+@MainActor @Observable
+final class ReleaseVisualQAPresentation {
+    static let shared = ReleaseVisualQAPresentation()
+    var colorScheme: ColorScheme = .dark
+}
+
 /// A deterministic, exact-app visual acceptance mode used by the release gate.
 ///
 /// The release executable accepts:
@@ -1237,6 +1245,7 @@ enum ReleaseVisualQARunner {
         scenario: ReleaseVisualQAConfiguration.Scenario,
         mode: ReleaseVisualQAConfiguration.Mode
     ) {
+        ReleaseVisualQAPresentation.shared.colorScheme = scenario.colorScheme
         if mode == .candidate {
             let targetSize = scenario.windowSize
             let visibleFrame = NSScreen.main?.visibleFrame ?? window.frame
