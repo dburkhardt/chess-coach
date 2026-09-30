@@ -85,7 +85,9 @@ struct ModelInferenceClient: Sendable {
         configuration: InferenceConfiguration,
         credential: String
     ) async throws -> [String] {
-        let normalized = try normalizedConfiguration(configuration, credential: credential)
+        let normalized = try normalizedConfiguration(
+            configuration, credential: credential, requiresModel: false
+        )
         guard let url = endpoint(baseURL: normalized.configuration.baseURL, path: "/v1/models") else {
             throw InferenceError.invalidEndpoint
         }
@@ -1138,7 +1140,8 @@ struct ModelInferenceClient: Sendable {
 
     private func normalizedConfiguration(
         _ configuration: InferenceConfiguration,
-        credential: String
+        credential: String,
+        requiresModel: Bool = true
     ) throws -> (configuration: InferenceConfiguration, credential: String) {
         let credential = credential.trimmingCharacters(
             in: .whitespacesAndNewlines
@@ -1150,7 +1153,9 @@ struct ModelInferenceClient: Sendable {
         guard self.endpoint(baseURL: endpoint, path: "") != nil else {
             throw InferenceError.invalidEndpoint
         }
-        let model = try normalizedModel(configuration.modelID)
+        let model = requiresModel
+            ? try normalizedModel(configuration.modelID)
+            : configuration.modelID.trimmingCharacters(in: .whitespacesAndNewlines)
         return (
             InferenceConfiguration(
                 provider: configuration.provider,

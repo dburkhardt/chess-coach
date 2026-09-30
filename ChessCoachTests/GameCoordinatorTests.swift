@@ -216,6 +216,66 @@ struct GameCoordinatorTests {
         #expect(harness.coordinator.canTakeBack)
     }
 
+    @Test func computerClockRunsDuringSearchAndSwitchesAfterReply() async throws {
+        let opponent = BlockingOpponentEngine()
+        let clock = ManualGameClock()
+        let harness = try makeHarness(opponent: opponent, clock: clock)
+        harness.coordinator.newGame(NewGameConfiguration(
+            colorChoice: .white, difficulty: 4, timeControl: .rapid10, blunderGuardEnabled: false
+        ))
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.isEngineThinking }
+        #expect(harness.coordinator.activeClockSide == .black)
+        let playerClock = harness.coordinator.clocks.whiteMilliseconds
+        await clock.advance(by: 10_000)
+        try await eventually { abs(harness.coordinator.clocks.blackMilliseconds - 590_000) <= 1 }
+        #expect(harness.coordinator.clocks.whiteMilliseconds == playerClock)
+        clock.elapseWithoutTick(by: 500)
+        await opponent.completeNext(with: "e7e5")
+        try await eventually { harness.coordinator.state.plyCount == 2 }
+        #expect(abs(harness.coordinator.clocks.blackMilliseconds - 589_500) <= 1)
+        #expect(harness.coordinator.activeClockSide == .white)
+    }
+
+    @Test func computerReplyAtDeadlineCannotPersistAfterTimeout() async throws {
+        let opponent = BlockingOpponentEngine()
+        let clock = ManualGameClock()
+        let harness = try makeHarness(opponent: opponent, clock: clock)
+        harness.coordinator.newGame(NewGameConfiguration(
+            colorChoice: .white, difficulty: 4, timeControl: .rapid10, blunderGuardEnabled: false
+        ))
+        play("e2", "e4", on: harness.coordinator)
+        try await eventually { harness.coordinator.isEngineThinking }
+        clock.elapseWithoutTick(by: 600_100)
+        await opponent.completeNext(with: "e7e5")
+        try await eventually { harness.coordinator.status.reason == .timeout }
+        #expect(harness.coordinator.status.result == .whiteWon)
+        #expect(harness.coordinator.state.uciMoves == ["e2e4"])
+        #expect(harness.coordinator.activeGame?.sortedPlies.count == 1)
+        #expect(!harness.coordinator.isEngineThinking)
+    }
+
+    @Test func whiteComputerClockSettlesTimeAndAddsIncrement() async throws {
+        let opponent = BlockingOpponentEngine()
+        let clock = ManualGameClock()
+        let harness = try makeHarness(opponent: opponent, clock: clock)
+        harness.coordinator.newGame(NewGameConfiguration(
+            colorChoice: .black, difficulty: 4,
+            timeControl: .rapid15Increment10, blunderGuardEnabled: false
+        ))
+        try await eventually { harness.coordinator.isEngineThinking }
+        #expect(harness.coordinator.activeClockSide == .white)
+        await drainTasks()
+        await clock.advance(by: 1_000)
+        try await eventually { abs(harness.coordinator.clocks.whiteMilliseconds - 899_000) <= 1 }
+        clock.elapseWithoutTick(by: 250)
+        await opponent.completeNext(with: "e2e4")
+        try await eventually { harness.coordinator.state.plyCount == 1 }
+        #expect(abs(harness.coordinator.clocks.whiteMilliseconds - 908_750) <= 1)
+        #expect(harness.coordinator.clocks.blackMilliseconds == 900_000)
+        #expect(harness.coordinator.activeClockSide == .black)
+    }
+
     @Test func blunderWarningRunsPlayerClockAndTakeBackRefundsWarningTime() async throws {
         let opponent = BlockingOpponentEngine()
         let clock = ManualGameClock()
@@ -687,7 +747,7 @@ struct GameCoordinatorTests {
                 == [.conceptHint]
         )
         #expect(harness.coordinator.isEngineThinking)
-        #expect(harness.coordinator.activeClockSide == nil)
+        #expect(harness.coordinator.activeClockSide == .black)
     }
 
     @Test func revealedTeachingMomentCommitsAnAlternateLegalMove() async throws {
@@ -1490,7 +1550,7 @@ struct GameCoordinatorTests {
         #expect(!game.profileIncorporated)
         #expect(harness.persistence.profile.reviewedGames == 0)
         #expect(harness.coordinator.isEngineThinking)
-        #expect(harness.coordinator.activeClockSide == nil)
+        #expect(harness.coordinator.activeClockSide == .black)
         #expect(harness.coordinator.historyPreview == nil)
         #expect(game.assistanceUsed)
         #expect(

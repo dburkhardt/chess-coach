@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import ChessCoach
 
@@ -36,6 +37,79 @@ struct StockfishServiceTests {
         #expect(ChessGameState().legalMoves.contains(analysis.bestMove))
         #expect(!analysis.variations.isEmpty)
         #expect(analysis.variations.count <= 2)
+        await service.shutdown()
+    }
+
+    @Test func simultaneousOpponentAndAnalystDoNotBlockAsyncWorkers() async throws {
+        if ProcessInfo.processInfo.environment["CHESS_COACH_REQUIRE_STRICT_EXECUTOR"] == "1" {
+            #expect(ProcessInfo.processInfo.environment["SWIFT_CONCURRENCY_DEBUG_STRICT"] == "1")
+        }
+        let opponent = StockfishService(role: .opponent)
+        let analyst = StockfishService(role: .analyst)
+        let state = ChessGameState()
+        _ = try state.make(uci: "e2e4")
+        let fen = state.fen
+        async let reply = opponent.opponentMove(
+            fen: fen, difficulty: 4,
+            clocks: .initial(for: .rapid10), timeControl: .rapid10
+        )
+        async let analysis = analyst.analyze(fen: fen, multiPV: 2, moveTimeMilliseconds: 100)
+        let (move, result) = try await (reply, analysis)
+        #expect(state.legalMoves.contains(move))
+        #expect(state.legalMoves.contains(result.bestMove))
+        await opponent.shutdown()
+        await analyst.shutdown()
+    }
+
+    @Test func silentEngineTimesOutInsteadOfThinkingForever() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("silent-engine")
+        try Data("#!/bin/sh\nexec /bin/sleep 30\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let service = StockfishService(
+            role: .opponent, executableURL: executable, responseTimeout: .milliseconds(100)
+        )
+        await #expect(throws: StockfishError.responseTimedOut) {
+            try await service.opponentMove(
+                fen: ChessGameState.standardInitialFEN, difficulty: 4,
+                clocks: .initial(for: .rapid10), timeControl: .rapid10
+            )
+        }
+        #expect(await service.isReady == false)
+        await service.shutdown()
+    }
+
+    @Test func engineThatStopsReplyingAfterHandshakeTimesOut() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("stalled-engine")
+        let script = """
+        #!/bin/sh
+        while IFS= read -r command; do
+            case "$command" in
+                uci) echo uciok ;;
+                isready) echo readyok ;;
+                quit) exit 0 ;;
+            esac
+        done
+        """
+        try Data((script + "\n").utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let service = StockfishService(
+            role: .opponent, executableURL: executable, responseTimeout: .seconds(1)
+        )
+        try await service.start()
+        #expect(await service.isReady)
+        await #expect(throws: StockfishError.responseTimedOut) {
+            try await service.opponentMove(
+                fen: ChessGameState.standardInitialFEN, difficulty: 4,
+                clocks: .initial(for: .rapid10), timeControl: .rapid10
+            )
+        }
+        #expect(await service.isReady == false)
         await service.shutdown()
     }
 

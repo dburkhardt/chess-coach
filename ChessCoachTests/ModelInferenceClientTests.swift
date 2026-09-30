@@ -8,6 +8,39 @@ import Testing
 
 @Suite(.serialized)
 struct ModelInferenceClientTests {
+    @Test func modelDiscoveryDoesNotRequireSelectedModel() async throws {
+        ReplyURLProtocol.reset(stubs: [
+            .init(status: 200, data: Data(#"{"data":[{"id":"model-b"},{"id":"model-a"},{"id":"model-b"}]}"#.utf8)),
+        ])
+        let sessionConfiguration = URLSessionConfiguration.ephemeral
+        sessionConfiguration.protocolClasses = [ReplyURLProtocol.self]
+        let client = ModelInferenceClient(session: URLSession(configuration: sessionConfiguration))
+        let configuration = InferenceConfiguration(
+            provider: .openAI, baseURL: "https://api.openai.com",
+            modelID: "   ", apiMode: .automatic
+        )
+
+        let models = try await client.listModels(configuration: configuration, credential: "test-key")
+
+        #expect(models == ["model-a", "model-b"])
+        #expect(ReplyURLProtocol.requests.count == 1)
+        #expect(ReplyURLProtocol.requests.first?.url?.path == "/v1/models")
+        #expect(ReplyURLProtocol.requests.first?.value(forHTTPHeaderField: "Authorization") == "Bearer test-key")
+        #expect(throws: InferenceError.missingModel) {
+            try client.validate(configuration: configuration, credential: "test-key")
+        }
+    }
+
+    @Test func modelDiscoveryStillRequiresOpenAIKey() async {
+        let configuration = InferenceConfiguration(
+            provider: .openAI, baseURL: "https://api.openai.com",
+            modelID: "", apiMode: .automatic
+        )
+        await #expect(throws: InferenceError.missingKey) {
+            try await ModelInferenceClient().listModels(configuration: configuration, credential: " ")
+        }
+    }
+
     @Test func responsesRequestUsesExpectedEndpointAndWireShape() throws {
         let request = try ModelInferenceClient().makeResponsesRequest(
             baseURL: "https://example.com/v1",
