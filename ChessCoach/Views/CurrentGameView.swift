@@ -859,5 +859,10 @@ private struct CompactMoveHistoryMenu: View {
 }
 
 extension Color {
-    static let coachGreen = Color(red: 0.28, green: 0.46, blue: 0.31)
+    static let coachGreen = Color(nsColor: NSColor(name: nil) { appearance in
+        if appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua {
+            return NSColor(srgbRed: 0.62, green: 0.82, blue: 0.66, alpha: 1)
+        }
+        return NSColor(srgbRed: 0.28, green: 0.46, blue: 0.31, alpha: 1)
+    })
 }
