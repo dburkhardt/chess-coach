@@ -991,6 +991,10 @@ enum ReleaseVisualQARunner {
             )
         }()
         if installedPreferences != nil {
+            writeNavigationProbeDiagnostics(
+                expectedExpanded: configuration.scenario.expectsExpandedNavigation,
+                window: window
+            )
             // Installed proof must include Coach, but the release gate must not
             // permanently change whether the user normally keeps it open.
             session.defaults.set(
@@ -1349,6 +1353,10 @@ enum ReleaseVisualQARunner {
             return isNavigationExpanded(in: window) != priorState
         }
         guard changed else {
+            writeNavigationProbeDiagnostics(
+                expectedExpanded: !priorState,
+                window: window
+            )
             throw ReleaseVisualQAError.splitViewUnavailable(
                 "navigation"
             )
