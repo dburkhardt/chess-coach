@@ -60,13 +60,14 @@ only the separately verified post-install gate launches the replacement.
 
 The in-app harness locates and captures the actual window created by the
 shipping SwiftUI `WindowGroup`; it is forbidden from constructing a second
-`NSWindow` or re-hosting `RootView`. It also refuses to capture unless that
-window is both foreground and key. This is intentional: WindowServer can return
-a correctly sized all-black privacy image when an automated or locked session
-cannot activate a window. AppKit's offscreen renderer also omits or corrupts
-separately composited materials and inspectors, so it is not accepted as a
-fallback. If foreground capture is unavailable, Prepare stops before approval,
-packaging, notarization, installation, or publication.
+`NSWindow` or re-hosting `RootView`. ScreenCaptureKit retrieves only the current
+process's shareable content and uses a desktop-independent window filter. This
+captures the complete composited window, including materials and the inspector,
+even when another app covers it, without requesting desktop recording access.
+The Mac must stay unlocked, but Chess Coach need not remain foreground or key.
+AppKit's offscreen renderer is not accepted as a fallback. Missing captures,
+blank pixels, failed geometry, or missing OCR text still stop the release before
+approval, packaging, notarization, installation, or publication.
 
 The receipt becomes `capture-failed`, and the exact signed artifact can be
 retried without rebuilding or re-signing:
@@ -81,9 +82,8 @@ A failed candidate may be opened for diagnosis only with
 an orange `QA Candidate · Unapproved` banner visible. It is not an approval.
 
 Candidate capture runs the complete scenario list inside one long-lived
-shipping process. macOS may require one click to make that window foreground
-and key at the start; the runner then resets the app between scenarios without
-relaunching it or racing another bundle with the same identifier.
+shipping process launched without activation. The runner resets the app between
+scenarios without relaunching it or racing another bundle with the same identifier.
 
 The harness captures these full windows:
 
