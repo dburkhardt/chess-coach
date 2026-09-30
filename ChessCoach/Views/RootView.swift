@@ -182,7 +182,7 @@ struct RootView: View {
     }
 
     private var isNavigationSidebarExpanded: Bool {
-        if ReleaseVisualQAConfiguration.isRequested {
+        if ReleaseVisualQAConfiguration.current?.mode == .candidate {
             return visualQANavigationExpanded
         }
         return AppNavigationSidebarVisibility(
@@ -191,7 +191,7 @@ struct RootView: View {
     }
 
     private func toggleNavigationSidebar() {
-        if ReleaseVisualQAConfiguration.isRequested {
+        if ReleaseVisualQAConfiguration.current?.mode == .candidate {
             visualQANavigationExpanded.toggle()
         } else {
             navigationSidebarVisibilityRaw = isNavigationSidebarExpanded
