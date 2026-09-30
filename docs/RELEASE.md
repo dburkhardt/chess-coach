@@ -281,8 +281,10 @@ requirement forces a new Prepare → Review → Approve cycle. Neither stage run
 the Xcode UI-test runner.
 
 Development builds and unit tests disable code signing. The release flow invokes
-each Developer ID signing command once and stops on failure; it does not retry a
-Keychain authorization failure or ask for a password in the terminal.
+each Developer ID signing command and stops on failure, except for up to two
+retries of Apple's exact missing-timestamp response. It does not retry a
+Keychain authorization failure, mixed diagnostics, or any other signing error,
+and never asks for a password in the terminal.
 
 After runtime approval, Publish atomically records the final DMG and checksum
 basenames and SHA-256 hashes while the receipt remains `runtime-approved`. At

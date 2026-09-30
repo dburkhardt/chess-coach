@@ -77,13 +77,7 @@ PUBLISH_ALREADY_PUBLISHED=0
 PUBLICATION_METADATA=""
 PUBLICATION_URL=""
 
-codesign_once() {
-  if codesign "$@"; then
-    return 0
-  fi
-  print -u2 "codesign failed. It was not retried, so a Keychain authorization problem cannot create repeated prompts."
-  return 1
-}
+source "${SCRIPT_DIR}/release-signing-lib.sh"
 
 installed_app_pids() {
   pgrep -f '^/Applications/Chess Coach\.app/Contents/MacOS/ChessCoach($| )' || true
