@@ -447,8 +447,8 @@ CANDIDATE_BUILD=$(plutil -extract CFBundleVersion raw -o - "${CANDIDATE_INFO}")
   { print -u2 "Candidate build mismatch: ${CANDIDATE_BUILD}."; exit 1; }
 
 if [[ "${MODE}" == "prepare" ]]; then
-  codesign_once --force --options runtime --timestamp --sign "${DEVELOPER_ID_APPLICATION}" "${ENGINE_PATH}"
-  codesign_once --force --options runtime --timestamp \
+  codesign_once --force --options runtime --timestamp=http://timestamp.apple.com/ts01 --sign "${DEVELOPER_ID_APPLICATION}" "${ENGINE_PATH}"
+  codesign_once --force --options runtime --timestamp=http://timestamp.apple.com/ts01 \
     --entitlements "${REPO_DIR}/ChessCoach/ChessCoach.entitlements" \
     --sign "${DEVELOPER_ID_APPLICATION}" "${APP_PATH}"
 fi
@@ -570,7 +570,7 @@ hdiutil create \
   "${PROVISIONAL_DMG_PATH}"
 rm -rf "${STAGING_PATH}"
 
-codesign_once --force --timestamp --sign "${DEVELOPER_ID_APPLICATION}" "${PROVISIONAL_DMG_PATH}"
+codesign_once --force --timestamp=http://timestamp.apple.com/ts01 --sign "${DEVELOPER_ID_APPLICATION}" "${PROVISIONAL_DMG_PATH}"
 codesign --verify --strict --verbose=2 "${PROVISIONAL_DMG_PATH}"
 xcrun notarytool submit "${PROVISIONAL_DMG_PATH}" --keychain-profile "${NOTARYTOOL_PROFILE}" --wait
 xcrun stapler staple "${PROVISIONAL_DMG_PATH}"
