@@ -13,6 +13,7 @@ fi
 "${SCRIPT_DIR}/test-graceful-app-quit.sh"
 "${SCRIPT_DIR}/test-release-artifact-lifecycle.sh"
 "${SCRIPT_DIR}/test-github-release-publication.sh"
+zsh "${SCRIPT_DIR}/test-release-signing.sh"
 
 xcodebuild \
   -project "${REPO_DIR}/ChessCoach.xcodeproj" \
