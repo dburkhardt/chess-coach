@@ -165,24 +165,15 @@ struct ChessCoachApp: App {
             .frame(minWidth: 620, minHeight: 760)
 
         if let visualQAConfiguration {
-            if visualQAConfiguration.scenarios.count == 1 {
-                root
-                    .preferredColorScheme(
+            root
+                .preferredColorScheme(
+                    ReleaseVisualQAPresentation.shared.colorScheme
+                )
+                .onAppear {
+                    ReleaseVisualQAPresentation.shared.colorScheme =
                         visualQAConfiguration.scenario.colorScheme
-                    )
-                    .onAppear {
-                        ReleaseVisualQARunner.shippingRootDidAppear()
-                    }
-            } else {
-                // The one-process release harness changes the real AppKit
-                // window appearance before each scenario. Pinning SwiftUI to
-                // the first scenario here would make later light/dark
-                // captures dishonest.
-                root
-                    .onAppear {
-                        ReleaseVisualQARunner.shippingRootDidAppear()
-                    }
-            }
+                    ReleaseVisualQARunner.shippingRootDidAppear()
+                }
         } else {
             root
         }
